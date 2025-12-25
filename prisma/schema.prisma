@@ -9,6 +9,7 @@ datasource db {
 
 model Signal {
   id        String   @id @default(uuid())
+  source    String   @default("BINANCE")
   assetType String
   instrument String
   interval  String
@@ -21,6 +22,8 @@ model Signal {
   tags      String[]
   reason    String
   levels    Json?
+  externalId String?
+  rawPayload Json?
   createdAt DateTime @default(now())
 
   @@index([assetType, instrument, interval, time])

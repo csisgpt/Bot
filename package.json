@@ -30,6 +30,8 @@
     "axios": "^1.6.8",
     "bullmq": "^5.16.0",
     "ioredis": "^5.4.1",
+    "imapflow": "^1.0.192",
+    "mailparser": "^3.7.1",
     "@prisma/client": "^5.13.0",
     "prisma": "^5.13.0",
     "dotenv": "^16.4.5",

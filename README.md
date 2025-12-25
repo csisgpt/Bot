@@ -4,7 +4,8 @@ Signals bot for Binance Spot data that generates trading alerts and sends them t
 
 ## What this project does
 
-- Worker pulls candle data from Binance Spot.
+- Worker pulls candle data from Binance Spot (default data provider).
+- TradingView alerts can be ingested via webhook or email and mapped into the same signal pipeline.
 - GOLD is tokenized gold (`XAUTUSDT`).
 - Multiple strategies generate signals that are persisted to Postgres and sent to Telegram.
 
@@ -55,6 +56,7 @@ Signals bot for Binance Spot data that generates trading alerts and sends them t
 - `GET /health` (API)
 - `GET /health` (worker)
 - `POST /admin/test-telegram`
+- `POST /webhooks/tradingview`
 
 For the admin Telegram test endpoint, provide either:
 
@@ -62,6 +64,11 @@ For the admin Telegram test endpoint, provide either:
 - `x-admin-token` header matching `ADMIN_TEST_TOKEN`.
 
 ## Configuration guide
+
+### Signal sources
+
+- **Binance** remains the default data provider for candles/quotes.
+- **TradingView** is a signal provider and can be ingested via webhook (paid plan) or email (free plan).
 
 ### Assets and instruments
 
@@ -95,6 +102,46 @@ Use `ATR_PERIOD`, `SL_ATR_MULTIPLIER`, `TP1_ATR_MULTIPLIER`, and `TP2_ATR_MULTIP
 
 - `SIGNAL_DEDUPE_TTL_SECONDS` prevents duplicate alerts for the same candle/strategy/side.
 - `SIGNAL_MIN_COOLDOWN_SECONDS` enforces a cooldown per asset + instrument + strategy.
+
+### TradingView webhook (paid plan)
+
+1. Set `TRADINGVIEW_WEBHOOK_ENABLED=true`.
+2. Set `TRADINGVIEW_WEBHOOK_SECRET`.
+3. Configure TradingView to POST alerts to:
+
+   ```
+   https://<your-host>/webhooks/tradingview
+   ```
+
+The webhook handler responds immediately and queues ingest work in the background.
+
+### TradingView email ingest (free plan)
+
+1. Set `TRADINGVIEW_EMAIL_ENABLED=true`.
+2. Configure the IMAP settings (`TRADINGVIEW_IMAP_*`) for the mailbox receiving alerts.
+3. Alerts will be polled and ingested on the configured interval.
+   - Email bodies can be raw JSON or include a JSON block between `---TV_JSON---` and `---/TV_JSON---`.
+
+### Recommended TradingView alert JSON payload
+
+Use this message template for webhook or email (email can embed JSON in the body):
+
+```json
+{
+  "token": "<secret>",
+  "source": "tradingview",
+  "assetType": "GOLD",
+  "instrument": "XAUTUSDT",
+  "interval": "15m",
+  "signal": "BUY",
+  "price": "{{close}}",
+  "strategy": "tv_ema_rsi",
+  "time": "{{time}}",
+  "tags": ["tv"]
+}
+```
+
+Webhook endpoints must be served over HTTPS and should respond quickly (<3s) to avoid TradingView retries.
 
 ## Smoke test
 

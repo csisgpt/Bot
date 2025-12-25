@@ -19,6 +19,7 @@ export const createBreakoutStrategy = (config: BreakoutConfig): Strategy => ({
 
     if (latest.close > high) {
       return {
+        source: 'BINANCE',
         assetType,
         instrument,
         interval,
@@ -37,6 +38,7 @@ export const createBreakoutStrategy = (config: BreakoutConfig): Strategy => ({
 
     if (latest.close < low) {
       return {
+        source: 'BINANCE',
         assetType,
         instrument,
         interval,

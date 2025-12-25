@@ -9,6 +9,7 @@ export class SignalsService {
   async storeSignal(signal: Signal): Promise<void> {
     await this.prismaService.signal.create({
       data: {
+        source: signal.source ?? 'BINANCE',
         assetType: signal.assetType,
         instrument: signal.instrument,
         interval: signal.interval,
@@ -21,6 +22,8 @@ export class SignalsService {
         tags: signal.tags,
         reason: signal.reason,
         levels: signal.levels ?? undefined,
+        externalId: signal.externalId ?? undefined,
+        rawPayload: signal.rawPayload ?? undefined,
       },
     });
   }
