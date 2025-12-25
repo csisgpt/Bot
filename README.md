@@ -70,6 +70,27 @@ For the admin Telegram test endpoint, provide either:
 - **Binance** remains the default data provider for candles/quotes.
 - **TradingView** is a signal provider and can be ingested via webhook (paid plan) or email (free plan).
 
+### Price ticker (Binance WS)
+
+Enable the real-time price ticker (posts every 10 seconds via the worker queue):
+
+```bash
+PRICE_TICKER_ENABLED=true
+PRICE_TICKER_POST_SECONDS=10
+PRICE_TICKER_POST_TO_GROUP=true
+PRICE_TICKER_POST_TO_CHANNEL=true
+PRICE_TICKER_INSTRUMENTS=XAUTUSDT,BTCUSDT
+```
+
+Required Telegram config:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_SIGNAL_GROUP_ID` and/or `TELEGRAM_SIGNAL_CHANNEL_ID`
+
+Binance WebSocket is used for real-time pricing and Redis caches the latest values. If the WS feed is unavailable, the worker falls back to Binance REST.
+
+**Note:** This is a high-frequency test mode and will post every 10 seconds without anti-spam.
+
 ### Assets and instruments
 
 Enable assets and their instruments via env:

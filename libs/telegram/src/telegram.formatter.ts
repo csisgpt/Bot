@@ -50,3 +50,27 @@ export const formatSignalMessage = (signal: Signal): string => {
 
   return lines.join('\n');
 };
+
+export interface PriceTickerEntry {
+  symbol: string;
+  price: number;
+}
+
+const formatUtcTimestamp = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const iso = date.toISOString();
+  return `${iso.slice(0, 19).replace('T', ' ')} UTC`;
+};
+
+export const formatPriceTickerMessage = (
+  entries: PriceTickerEntry[],
+  timestamp: number = Date.now(),
+): string => {
+  const lines = ['🟡 Price Ticker (Binance)', formatUtcTimestamp(timestamp)];
+
+  for (const entry of entries) {
+    lines.push(`${entry.symbol}: ${formatNumber(entry.price)}`);
+  }
+
+  return lines.join('\n');
+};

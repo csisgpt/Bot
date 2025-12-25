@@ -35,6 +35,13 @@ export class TelegramService {
     await this.sendMessageToDestinations(message);
   }
 
+  async sendMessage(chatId: string, message: string, parseMode?: string): Promise<void> {
+    await this.bot.telegram.sendMessage(chatId, message, {
+      parse_mode: parseMode ?? this.parseMode,
+      disable_web_page_preview: this.disableWebPreview,
+    });
+  }
+
   private async sendMessageToDestinations(message: string): Promise<void> {
     if (this.channelId) {
       await this.bot.telegram.sendMessage(this.channelId, message, {
