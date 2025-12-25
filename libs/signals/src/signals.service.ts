@@ -1,22 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@libs/core';
-import { StrategySignal } from './strategy';
+import { Signal } from './types';
 
 @Injectable()
 export class SignalsService {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async storeSignal(signal: StrategySignal): Promise<void> {
+  async storeSignal(signal: Signal): Promise<void> {
     await this.prismaService.signal.create({
       data: {
-        symbol: signal.symbol,
+        assetType: signal.assetType,
+        instrument: signal.instrument,
         interval: signal.interval,
-        type: signal.type,
+        strategy: signal.strategy,
+        kind: signal.kind,
+        side: signal.side,
         time: new Date(signal.time),
         price: signal.price,
-        emaFast: signal.emaFast,
-        emaSlow: signal.emaSlow,
-        rsi: signal.rsi,
+        confidence: signal.confidence,
+        tags: signal.tags,
+        reason: signal.reason,
+        levels: signal.levels ?? undefined,
       },
     });
   }
