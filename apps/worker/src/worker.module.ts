@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullModule } from '@nestjs/bullmq';
-import { CoreModule, createRedisConnection } from '@libs/core';
+import { CoreModule, createRedisConnection, SIGNALS_QUEUE_NAME } from '@libs/core';
 import { BinanceModule } from '@libs/binance';
 import { SignalsModule } from '@libs/signals';
 import { TelegramModule } from '@libs/telegram';
@@ -9,6 +9,8 @@ import { HealthController } from './health.controller';
 import { SignalsCron } from './cron/signals.cron';
 import { SendTelegramProcessor } from './queues/send-telegram.processor';
 import { ConfigService } from '@nestjs/config';
+import { TradingViewIngestProcessor } from './queues/tradingview-ingest.processor';
+import { TradingViewEmailIngestService } from './tradingview/tradingview-email.service';
 
 @Module({
   imports: [
@@ -24,9 +26,14 @@ import { ConfigService } from '@nestjs/config';
         connection: createRedisConnection(configService),
       }),
     }),
-    BullModule.registerQueue({ name: 'signals' }),
+    BullModule.registerQueue({ name: SIGNALS_QUEUE_NAME }),
   ],
   controllers: [HealthController],
-  providers: [SignalsCron, SendTelegramProcessor],
+  providers: [
+    SignalsCron,
+    SendTelegramProcessor,
+    TradingViewIngestProcessor,
+    TradingViewEmailIngestService,
+  ],
 })
 export class WorkerModule {}

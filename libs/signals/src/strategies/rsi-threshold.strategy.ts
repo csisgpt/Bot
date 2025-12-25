@@ -22,6 +22,7 @@ export const createRsiThresholdStrategy = (config: RsiThresholdConfig): Strategy
 
     if (currRsi <= config.rsiBuyThreshold) {
       return {
+        source: 'BINANCE',
         assetType,
         instrument,
         interval,
@@ -38,6 +39,7 @@ export const createRsiThresholdStrategy = (config: RsiThresholdConfig): Strategy
 
     if (currRsi >= config.rsiSellThreshold) {
       return {
+        source: 'BINANCE',
         assetType,
         instrument,
         interval,

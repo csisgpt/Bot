@@ -4,6 +4,8 @@ export type SignalKind = 'ENTRY' | 'EXIT' | 'ALERT';
 
 export type SignalSide = 'BUY' | 'SELL' | 'NEUTRAL';
 
+export type SignalSource = 'BINANCE' | 'TRADINGVIEW';
+
 export interface SignalLevels {
   entry?: number;
   sl?: number;
@@ -12,18 +14,21 @@ export interface SignalLevels {
 }
 
 export interface Signal {
+  source: SignalSource;
   assetType: AssetType;
   instrument: string;
   interval: string;
   strategy: string;
   kind: SignalKind;
   side: SignalSide;
-  price: number;
+  price: number | null;
   time: number;
   confidence: number;
   tags: string[];
   reason: string;
   levels?: SignalLevels;
+  externalId?: string;
+  rawPayload?: unknown;
 }
 
 export interface Candle {

@@ -32,6 +32,7 @@ export const createMacdStrategy = (config: MacdConfig): Strategy => ({
 
     if (prevMacd <= prevSignal && currMacd > currSignal) {
       return {
+        source: 'BINANCE',
         assetType,
         instrument,
         interval,
@@ -48,6 +49,7 @@ export const createMacdStrategy = (config: MacdConfig): Strategy => ({
 
     if (prevMacd >= prevSignal && currMacd < currSignal) {
       return {
+        source: 'BINANCE',
         assetType,
         instrument,
         interval,

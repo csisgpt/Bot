@@ -2,8 +2,9 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { TelegramService } from '@libs/telegram';
 import { Signal } from '@libs/signals';
+import { SIGNALS_QUEUE_CONCURRENCY, SIGNALS_QUEUE_NAME } from '@libs/core';
 
-@Processor('signals')
+@Processor(SIGNALS_QUEUE_NAME, { concurrency: SIGNALS_QUEUE_CONCURRENCY })
 export class SendTelegramProcessor extends WorkerHost {
   constructor(private readonly telegramService: TelegramService) {
     super();

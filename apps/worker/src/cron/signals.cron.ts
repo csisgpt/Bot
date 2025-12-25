@@ -9,10 +9,11 @@ import {
   Candle,
   FeedRegistry,
   Signal,
+  SignalDedupeService,
   SignalsService,
   StrategyRegistry,
 } from '@libs/signals';
-import { RedisService } from '@libs/core';
+import { SIGNALS_QUEUE_NAME } from '@libs/core';
 
 @Injectable()
 export class SignalsCron {
@@ -21,10 +22,10 @@ export class SignalsCron {
   constructor(
     private readonly signalsService: SignalsService,
     private readonly configService: ConfigService,
-    private readonly redisService: RedisService,
+    private readonly signalDedupeService: SignalDedupeService,
     private readonly feedRegistry: FeedRegistry,
     private readonly strategyRegistry: StrategyRegistry,
-    @InjectQueue('signals') private readonly signalsQueue: Queue,
+    @InjectQueue(SIGNALS_QUEUE_NAME) private readonly signalsQueue: Queue,
   ) {}
 
   @Cron('*/1 * * * *')
@@ -36,8 +37,6 @@ export class SignalsCron {
       .filter((asset): asset is AssetType => asset === 'GOLD' || asset === 'CRYPTO');
     const interval = this.configService.get<string>('BINANCE_INTERVAL', '15m');
     const limit = this.configService.get<number>('BINANCE_KLINES_LIMIT', 200);
-    const dedupeTtl = this.configService.get<number>('SIGNAL_DEDUPE_TTL_SECONDS', 7200);
-    const cooldownSeconds = this.configService.get<number>('SIGNAL_MIN_COOLDOWN_SECONDS', 300);
     const strategiesEnabled = this.parseList(
       this.configService.get<string>('STRATEGIES_ENABLED', 'ema_rsi'),
     );
@@ -62,24 +61,14 @@ export class SignalsCron {
             }
 
             const signal = riskLevelsEnabled ? this.attachRiskLevels(rawSignal, candles) : rawSignal;
-            const dedupeKey = `signal:${signal.assetType}:${signal.instrument}:${signal.interval}:${signal.strategy}:${signal.time}:${signal.side}`;
-            const cooldownKey = `cooldown:${signal.assetType}:${signal.instrument}:${signal.interval}:${signal.strategy}`;
-
-            const [dedupeExists, cooldownExists] = await Promise.all([
-              this.redisService.get(dedupeKey),
-              this.redisService.get(cooldownKey),
-            ]);
-
-            if (dedupeExists || cooldownExists) {
+            const shouldProcess = await this.signalDedupeService.isAllowed(signal);
+            if (!shouldProcess) {
               continue;
             }
-
-            await this.redisService.set(dedupeKey, '1', 'EX', dedupeTtl);
-            await this.redisService.set(cooldownKey, '1', 'EX', cooldownSeconds);
             await this.signalsService.storeSignal(signal);
             await this.signalsQueue.add('sendTelegramSignal', signal, {
               removeOnComplete: true,
-              removeOnFail: true,
+              removeOnFail: { count: 50 },
             });
           }
         } catch (error) {

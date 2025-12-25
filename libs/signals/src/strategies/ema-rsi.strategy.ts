@@ -32,6 +32,7 @@ export const createEmaRsiStrategy = (config: EmaRsiConfig): Strategy => ({
 
     if (prevFast <= prevSlow && currFast > currSlow && currRsi < config.rsiSellThreshold) {
       return {
+        source: 'BINANCE',
         assetType,
         instrument,
         interval,
@@ -50,6 +51,7 @@ export const createEmaRsiStrategy = (config: EmaRsiConfig): Strategy => ({
 
     if (prevFast >= prevSlow && currFast < currSlow && currRsi > config.rsiBuyThreshold) {
       return {
+        source: 'BINANCE',
         assetType,
         instrument,
         interval,
