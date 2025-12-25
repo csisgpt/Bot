@@ -21,6 +21,10 @@ export class TelegramService {
     this.bot = new Telegraf(token);
   }
 
+  async sendTestMessage(message: string): Promise<void> {
+    await this.sendMessageToDestinations(message);
+  }
+
   async sendSignal(signal: StrategySignal): Promise<void> {
     const message = [
       `📈 Signal: ${signal.type}`,
@@ -33,6 +37,10 @@ export class TelegramService {
       `Time: ${new Date(signal.time).toISOString()}`,
     ].join('\n');
 
+    await this.sendMessageToDestinations(message);
+  }
+
+  private async sendMessageToDestinations(message: string): Promise<void> {
     if (this.channelId) {
       await this.bot.telegram.sendMessage(this.channelId, message);
     }
