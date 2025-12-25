@@ -9,15 +9,19 @@ datasource db {
 
 model Signal {
   id        String   @id @default(uuid())
-  symbol    String
+  assetType String
+  instrument String
   interval  String
-  type      String
+  strategy  String
+  kind      String
+  side      String
   time      DateTime
   price     Float
-  emaFast   Float
-  emaSlow   Float
-  rsi       Float
+  confidence Int
+  tags      String[]
+  reason    String
+  levels    Json?
   createdAt DateTime @default(now())
 
-  @@index([symbol, interval, time])
+  @@index([assetType, instrument, interval, time])
 }

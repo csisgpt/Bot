@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Telegraf } from 'telegraf';
-import { StrategySignal } from '@libs/signals';
+import { Signal } from '@libs/signals';
+import { formatSignalMessage } from './telegram.formatter';
 
 @Injectable()
 export class TelegramService {
@@ -9,6 +10,8 @@ export class TelegramService {
   private readonly bot: Telegraf;
   private readonly channelId: string;
   private readonly groupId: string;
+  private readonly parseMode: string;
+  private readonly disableWebPreview: boolean;
 
   constructor(configService: ConfigService) {
     const token = configService.get<string>('TELEGRAM_BOT_TOKEN');
@@ -18,6 +21,8 @@ export class TelegramService {
 
     this.channelId = configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '');
     this.groupId = configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '');
+    this.parseMode = configService.get<string>('TELEGRAM_PARSE_MODE', 'HTML');
+    this.disableWebPreview = configService.get<boolean>('TELEGRAM_DISABLE_WEB_PAGE_PREVIEW', true);
     this.bot = new Telegraf(token);
   }
 
@@ -25,28 +30,24 @@ export class TelegramService {
     await this.sendMessageToDestinations(message);
   }
 
-  async sendSignal(signal: StrategySignal): Promise<void> {
-    const message = [
-      `📈 Signal: ${signal.type}`,
-      `Symbol: ${signal.symbol}`,
-      `Interval: ${signal.interval}`,
-      `Price: ${signal.price.toFixed(4)}`,
-      `EMA12: ${signal.emaFast.toFixed(4)}`,
-      `EMA26: ${signal.emaSlow.toFixed(4)}`,
-      `RSI: ${signal.rsi.toFixed(2)}`,
-      `Time: ${new Date(signal.time).toISOString()}`,
-    ].join('\n');
-
+  async sendSignal(signal: Signal): Promise<void> {
+    const message = formatSignalMessage(signal);
     await this.sendMessageToDestinations(message);
   }
 
   private async sendMessageToDestinations(message: string): Promise<void> {
     if (this.channelId) {
-      await this.bot.telegram.sendMessage(this.channelId, message);
+      await this.bot.telegram.sendMessage(this.channelId, message, {
+        parse_mode: this.parseMode,
+        disable_web_page_preview: this.disableWebPreview,
+      });
     }
 
     if (this.groupId) {
-      await this.bot.telegram.sendMessage(this.groupId, message);
+      await this.bot.telegram.sendMessage(this.groupId, message, {
+        parse_mode: this.parseMode,
+        disable_web_page_preview: this.disableWebPreview,
+      });
     }
 
     if (!this.channelId && !this.groupId) {

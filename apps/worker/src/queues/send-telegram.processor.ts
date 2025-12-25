@@ -1,7 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { TelegramService } from '@libs/telegram';
-import { StrategySignal } from '@libs/signals';
+import { Signal } from '@libs/signals';
 
 @Processor('signals')
 export class SendTelegramProcessor extends WorkerHost {
@@ -9,7 +9,7 @@ export class SendTelegramProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<StrategySignal>): Promise<void> {
+  async process(job: Job<Signal>): Promise<void> {
     if (job.name !== 'sendTelegramSignal') {
       return;
     }

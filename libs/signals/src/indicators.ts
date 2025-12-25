@@ -46,3 +46,61 @@ export function rsi(values: number[], period = 14): number[] {
 
   return result;
 }
+
+export function atr(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period = 14,
+): number[] {
+  if (highs.length === 0 || lows.length === 0 || closes.length === 0) {
+    return [];
+  }
+
+  const length = Math.min(highs.length, lows.length, closes.length);
+  const result: number[] = new Array(length).fill(0);
+  const trueRanges: number[] = new Array(length).fill(0);
+
+  for (let i = 0; i < length; i += 1) {
+    if (i === 0) {
+      trueRanges[i] = highs[i] - lows[i];
+      continue;
+    }
+
+    const highLow = highs[i] - lows[i];
+    const highClose = Math.abs(highs[i] - closes[i - 1]);
+    const lowClose = Math.abs(lows[i] - closes[i - 1]);
+    trueRanges[i] = Math.max(highLow, highClose, lowClose);
+  }
+
+  let trSum = 0;
+  for (let i = 0; i < length; i += 1) {
+    trSum += trueRanges[i];
+    if (i === period - 1) {
+      result[i] = trSum / period;
+    } else if (i >= period) {
+      result[i] = (result[i - 1] * (period - 1) + trueRanges[i]) / period;
+    }
+  }
+
+  return result;
+}
+
+export function macd(
+  values: number[],
+  fastPeriod = 12,
+  slowPeriod = 26,
+  signalPeriod = 9,
+): { macdLine: number[]; signalLine: number[]; histogram: number[] } {
+  if (values.length === 0) {
+    return { macdLine: [], signalLine: [], histogram: [] };
+  }
+
+  const emaFast = ema(values, fastPeriod);
+  const emaSlow = ema(values, slowPeriod);
+  const macdLine = values.map((_, index) => emaFast[index] - emaSlow[index]);
+  const signalLine = ema(macdLine, signalPeriod);
+  const histogram = macdLine.map((value, index) => value - signalLine[index]);
+
+  return { macdLine, signalLine, histogram };
+}

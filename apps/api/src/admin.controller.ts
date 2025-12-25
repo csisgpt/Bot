@@ -14,7 +14,9 @@ export class AdminController {
     @Headers('x-owner-user-id') ownerUserIdHeader?: string,
     @Headers('x-admin-token') adminTokenHeader?: string,
   ): Promise<{ ok: true }> {
-    const ownerUserId = this.configService.get<string>('OWNER_USER_ID');
+    const ownerUserId =
+      this.configService.get<string>('TELEGRAM_OWNER_USER_ID') ??
+      this.configService.get<string>('OWNER_USER_ID');
     const adminToken = this.configService.get<string>('ADMIN_TEST_TOKEN');
 
     const ownerMatch = Boolean(ownerUserId && ownerUserIdHeader === ownerUserId);
