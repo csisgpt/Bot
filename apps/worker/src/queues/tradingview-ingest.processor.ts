@@ -39,42 +39,56 @@ export class TradingViewIngestProcessor extends WorkerHost {
       return;
     }
 
+    const startedAt = Date.now();
+
+    // Parse once and reuse (also in catch)
+    const { payloadRaw } = job.data;
+    const { payload, parseError } = parseTradingViewPayload(payloadRaw);
+
+    // Pre-calc for logging (also in catch)
+    const instrument = (payload.instrument ?? payload.symbol ?? 'unknown') as string;
+    const interval = (payload.interval ?? payload.timeframe ?? 'unknown') as string;
+    const strategy = (payload.strategy ?? 'unknown') as string;
+
     try {
-      const { payloadRaw } = job.data;
-      const { payload, parseError } = parseTradingViewPayload(payloadRaw);
-      if (parseError) {
-        this.logger.warn(
-          `TradingView payload parse error for job ${job.id ?? 'unknown'}: ${parseError}`,
-        );
-      }
-
       const defaults = this.getDefaults();
-      const priceFallback = await this.resolvePriceFallback(payload, defaults);
-      const signal = mapTradingViewPayloadToSignal(payloadRaw, defaults, priceFallback);
 
-      if (signal.price === null) {
-        this.logger.warn(
-          `TradingView price unavailable for job ${job.id ?? 'unknown'} (${signal.instrument} ${signal.interval})`,
-        );
-      }
+      // ✅ 1) خیلی سریع سیگنال رو بساز (بدون اینکه منتظر fallback بمونی)
+      const signal = mapTradingViewPayloadToSignal(payloadRaw, defaults, undefined);
 
-      const shouldProcess = await this.signalDedupeService.isAllowed(signal);
-      if (!shouldProcess) {
-        return;
-      }
+      // ✅ 2) همون لحظه enqueue کن
+      const attempts = this.getNumber('SIGNALS_TELEGRAM_JOB_ATTEMPTS', 5);
+      const backoffDelayMs = this.getNumber('SIGNALS_TELEGRAM_JOB_BACKOFF_DELAY_MS', 2000);
+      const priority = this.getNumber('SIGNALS_TELEGRAM_JOB_PRIORITY', 1);
 
-      await this.signalsService.storeSignal(signal);
       await this.signalsQueue.add('sendTelegramSignal', signal, {
+        priority,
+        attempts,
+        backoff: { type: 'exponential', delay: backoffDelayMs },
         removeOnComplete: true,
-        removeOnFail: { count: 50 },
+        removeOnFail: { count: 200 },
       });
+
+      // ✅ 3) بعدش اگر price خالی بود، تلاش کن fallback بگیری (اما ارسال تلگرام انجام شده)
+      if (signal.price === null) {
+        const priceFallbackTimeoutMs = this.getNumber('TRADINGVIEW_PRICE_FALLBACK_TIMEOUT_MS', 800);
+
+        void this.withTimeout(this.resolvePriceFallback(payload, defaults), priceFallbackTimeoutMs, undefined)
+          .then((priceFallback) => {
+            // اگر خواستی: اینجا می‌تونی یک "update" سیگنال ذخیره کنی یا log بزنی
+            if (priceFallback !== undefined) {
+              this.logger.log(`Resolved fallback price: ${priceFallback} for ${signal.instrument}`);
+            }
+          })
+          .catch((e) => this.logger.warn(`Fallback price resolve failed: ${e?.message ?? e}`));
+      }
+
+      // ✅ 4) ذخیره در DB هم non-blocking (تا ingest کند نشود)
+      void this.signalsService.storeSignal(signal).catch((e) =>
+        this.logger.warn(`storeSignal failed: ${e?.message ?? e}`),
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      const { payloadRaw } = job.data;
-      const { payload } = parseTradingViewPayload(payloadRaw);
-      const instrument = (payload.instrument ?? payload.symbol ?? 'unknown') as string;
-      const interval = (payload.interval ?? payload.timeframe ?? 'unknown') as string;
-      const strategy = (payload.strategy ?? 'unknown') as string;
       this.logger.error(
         `TradingView ingest failed for job ${job.id ?? 'unknown'} (${instrument} ${interval} ${strategy}): ${message}`,
       );
@@ -92,11 +106,21 @@ export class TradingViewIngestProcessor extends WorkerHost {
       'TRADINGVIEW_DEFAULT_INTERVAL',
       this.configService.get<string>('BINANCE_INTERVAL', '15m'),
     );
+
     return {
-      assetType: this.configService.get<Signal['assetType']>('TRADINGVIEW_DEFAULT_ASSET_TYPE', 'GOLD'),
-      instrument: this.configService.get<string>('TRADINGVIEW_DEFAULT_INSTRUMENT', 'XAUTUSDT'),
+      assetType: this.configService.get<Signal['assetType']>(
+        'TRADINGVIEW_DEFAULT_ASSET_TYPE',
+        'GOLD',
+      ),
+      instrument: this.configService.get<string>(
+        'TRADINGVIEW_DEFAULT_INSTRUMENT',
+        'XAUTUSDT',
+      ),
       interval: defaultInterval,
-      strategy: this.configService.get<string>('TRADINGVIEW_DEFAULT_STRATEGY', 'tradingview'),
+      strategy: this.configService.get<string>(
+        'TRADINGVIEW_DEFAULT_STRATEGY',
+        'tradingview',
+      ),
     };
   }
 
@@ -125,5 +149,30 @@ export class TradingViewIngestProcessor extends WorkerHost {
     }
 
     return undefined;
+  }
+
+  private getNumber(key: string, fallback: number): number {
+    const raw = this.configService.get<string | number | undefined>(key);
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    fallback: T,
+  ): Promise<T> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+
+    return Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        const t = setTimeout(() => {
+          clearTimeout(t);
+          resolve(fallback);
+        }, timeoutMs);
+      }),
+    ]);
   }
 }

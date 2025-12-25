@@ -14,10 +14,10 @@
     "skipLibCheck": true,
     "strict": true,
     "paths": {
-      "@libs/binance": ["libs/binance/src/index.ts"],
-      "@libs/signals": ["libs/signals/src/index.ts"],
-      "@libs/telegram": ["libs/telegram/src/index.ts"],
-      "@libs/core": ["libs/core/src/index.ts"]
+      "@libs/binance": ["libs/binance/src/index"],
+      "@libs/signals": ["libs/signals/src/index"],
+      "@libs/telegram": ["libs/telegram/src/index"],
+      "@libs/core": ["libs/core/src/index"]
     }
   }
 }

@@ -8,9 +8,8 @@ import { TelegramModule } from '@libs/telegram';
 import { HealthController } from './health.controller';
 import { SignalsCron } from './cron/signals.cron';
 import { PriceTickerCron } from './cron/price-ticker.cron';
-import { SendTelegramProcessor } from './queues/send-telegram.processor';
 import { ConfigService } from '@nestjs/config';
-import { TradingViewIngestProcessor } from './queues/tradingview-ingest.processor';
+import { SignalsProcessor } from './queues/signals.processor';
 import { TradingViewEmailIngestService } from './tradingview/tradingview-email.service';
 
 @Module({
@@ -33,8 +32,7 @@ import { TradingViewEmailIngestService } from './tradingview/tradingview-email.s
   providers: [
     SignalsCron,
     PriceTickerCron,
-    SendTelegramProcessor,
-    TradingViewIngestProcessor,
+    SignalsProcessor,
     TradingViewEmailIngestService,
   ],
 })

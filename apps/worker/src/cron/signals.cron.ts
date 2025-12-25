@@ -35,12 +35,15 @@ export class SignalsCron {
     )
       .map((asset) => asset.toUpperCase())
       .filter((asset): asset is AssetType => asset === 'GOLD' || asset === 'CRYPTO');
+
     const interval = this.configService.get<string>('BINANCE_INTERVAL', '15m');
     const limit = this.configService.get<number>('BINANCE_KLINES_LIMIT', 200);
+
     const strategiesEnabled = this.parseList(
       this.configService.get<string>('STRATEGIES_ENABLED', 'ema_rsi'),
     );
     const strategies = this.strategyRegistry.getByNames(strategiesEnabled);
+
     const riskLevelsEnabled = this.configService.get<boolean>('ENABLE_RISK_LEVELS', true);
 
     for (const assetType of assetsEnabled) {
@@ -50,22 +53,21 @@ export class SignalsCron {
       for (const instrument of instruments) {
         try {
           const candles = await feed.getCandles({ instrument, interval, limit });
-          if (candles.length < 2) {
-            continue;
-          }
+          if (!candles || candles.length < 2) continue;
 
           for (const strategy of strategies) {
             const rawSignal = strategy.run({ candles, instrument, interval, assetType });
-            if (!rawSignal) {
-              continue;
-            }
+            if (!rawSignal) continue;
 
-            const signal = riskLevelsEnabled ? this.attachRiskLevels(rawSignal, candles) : rawSignal;
+            const signal = riskLevelsEnabled
+              ? this.attachRiskLevels(rawSignal, candles)
+              : rawSignal;
+
             const shouldProcess = await this.signalDedupeService.isAllowed(signal);
-            if (!shouldProcess) {
-              continue;
-            }
+            if (!shouldProcess) continue;
+
             await this.signalsService.storeSignal(signal);
+
             await this.signalsQueue.add('sendTelegramSignal', signal, {
               removeOnComplete: true,
               removeOnFail: { count: 50 },
@@ -73,7 +75,7 @@ export class SignalsCron {
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unknown error';
-          this.logger.error(`Failed to process ${assetType}/${instrument}: ${message}`);
+          this.logger.error(`Failed to process ${assetType}/${instrument}: ${message}`, error as any);
         }
       }
     }
@@ -97,24 +99,36 @@ export class SignalsCron {
     const cryptoInstruments = this.parseList(
       this.configService.get<string>('CRYPTO_INSTRUMENTS', ''),
     );
-    if (cryptoInstruments.length > 0) {
-      return cryptoInstruments;
-    }
+    if (cryptoInstruments.length > 0) return cryptoInstruments;
 
     const legacy = this.parseList(this.configService.get<string>('BINANCE_SYMBOLS', 'BTCUSDT'));
     return legacy.length > 0 ? legacy : ['BTCUSDT'];
   }
 
+  /**
+   * Adds SL/TP levels based on ATR, but ONLY if:
+   * - ATR is valid
+   * - signal.price is a valid number (non-null)
+   */
   private attachRiskLevels(signal: Signal, candles: Candle[]): Signal {
-    const highs = candles.map((candle) => candle.high);
-    const lows = candles.map((candle) => candle.low);
-    const closes = candles.map((candle) => candle.close);
     const period = this.configService.get<number>('ATR_PERIOD', 14);
+
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const closes = candles.map((c) => c.close);
+
     const atrValues = atr(highs, lows, closes, period);
     const lastAtr = atrValues[candles.length - 1];
 
     if (!lastAtr || Number.isNaN(lastAtr)) {
       return signal;
+    }
+
+    // IMPORTANT: price may be null (e.g. TradingView payload without price)
+    const price = signal.price ?? null;
+    if (price == null || !Number.isFinite(price)) {
+      // Can't compute risk levels without a price; return signal unchanged (levels stays undefined)
+      return { ...signal, levels: undefined };
     }
 
     const slMultiplier = this.configService.get<number>('SL_ATR_MULTIPLIER', 1.5);
@@ -125,10 +139,10 @@ export class SignalsCron {
       return {
         ...signal,
         levels: {
-          entry: signal.price,
-          sl: signal.price - lastAtr * slMultiplier,
-          tp1: signal.price + lastAtr * tp1Multiplier,
-          tp2: signal.price + lastAtr * tp2Multiplier,
+          entry: price,
+          sl: price - lastAtr * slMultiplier,
+          tp1: price + lastAtr * tp1Multiplier,
+          tp2: price + lastAtr * tp2Multiplier,
         },
       };
     }
@@ -137,14 +151,14 @@ export class SignalsCron {
       return {
         ...signal,
         levels: {
-          entry: signal.price,
-          sl: signal.price + lastAtr * slMultiplier,
-          tp1: signal.price - lastAtr * tp1Multiplier,
-          tp2: signal.price - lastAtr * tp2Multiplier,
+          entry: price,
+          sl: price + lastAtr * slMultiplier,
+          tp1: price - lastAtr * tp1Multiplier,
+          tp2: price - lastAtr * tp2Multiplier,
         },
       };
     }
 
-    return signal;
+    return { ...signal, levels: undefined };
   }
 }

@@ -27,7 +27,7 @@ const formatLevels = (levels?: Signal['levels']): string[] => {
 };
 
 export const formatSignalMessage = (signal: Signal): string => {
-  const header = signal.side === 'BUY' ? '🟢 BUY' : signal.side === 'SELL' ? '🔴 SELL' : '⚪️ NEUTRAL';
+  const header = signal.side === 'BUY' ? '🟢 1خ' : signal.side === 'SELL' ? '🔴 1ف' : '⚪️ NEUTRAL';
   const lines = [
     `<b>${header}</b>`,
     `<b>Asset:</b> ${signal.assetType}`,

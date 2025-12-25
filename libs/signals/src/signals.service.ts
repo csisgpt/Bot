@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@libs/core';
 import { Signal } from './types';
+import { Prisma } from '@prisma/client';
+
 
 @Injectable()
 export class SignalsService {
@@ -21,8 +23,8 @@ export class SignalsService {
         confidence: signal.confidence,
         tags: signal.tags,
         reason: signal.reason,
-        levels: signal.levels ?? undefined,
-        externalId: signal.externalId ?? undefined,
+        levels: signal.levels ? (signal.levels as any) : undefined,
+                externalId: signal.externalId ?? undefined,
         rawPayload: signal.rawPayload ?? undefined,
       },
     });

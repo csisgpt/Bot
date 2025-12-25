@@ -26,7 +26,7 @@ export class AdminController {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
-    const message = `✅ Telegram test from API (${new Date().toISOString()})`;
+    const message = `✅ Telegram test from API (${new Date().toISOString()}) I Love U`;
     await this.telegramService.sendTestMessage(message);
 
     return { ok: true };

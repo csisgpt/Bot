@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Telegraf } from 'telegraf';
 import { Signal } from '@libs/signals';
 import { formatSignalMessage } from './telegram.formatter';
+import type { ParseMode } from 'telegraf/types';
 
 @Injectable()
 export class TelegramService {
@@ -10,18 +11,24 @@ export class TelegramService {
   private readonly bot: Telegraf;
   private readonly channelId: string;
   private readonly groupId: string;
-  private readonly parseMode: string;
+  private readonly parseMode: ParseMode;
   private readonly disableWebPreview: boolean;
+
+
 
   constructor(configService: ConfigService) {
     const token = configService.get<string>('TELEGRAM_BOT_TOKEN');
-    if (!token) {
-      throw new Error('TELEGRAM_BOT_TOKEN is required');
-    }
+    if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
 
     this.channelId = configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '');
     this.groupId = configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '');
-    this.parseMode = configService.get<string>('TELEGRAM_PARSE_MODE', 'HTML');
+
+    const pm = (configService.get<string>('TELEGRAM_PARSE_MODE', 'HTML') || 'HTML').toUpperCase();
+    this.parseMode =
+      pm === 'MARKDOWN' || pm === 'MARKDOWNV2' || pm === 'HTML'
+        ? (pm as ParseMode)
+        : 'HTML';
+
     this.disableWebPreview = configService.get<boolean>('TELEGRAM_DISABLE_WEB_PAGE_PREVIEW', true);
     this.bot = new Telegraf(token);
   }
@@ -35,10 +42,10 @@ export class TelegramService {
     await this.sendMessageToDestinations(message);
   }
 
-  async sendMessage(chatId: string, message: string, parseMode?: string): Promise<void> {
+  async sendMessage(chatId: string, message: string, parseMode?: ParseMode): Promise<void> {
     await this.bot.telegram.sendMessage(chatId, message, {
       parse_mode: parseMode ?? this.parseMode,
-      disable_web_page_preview: this.disableWebPreview,
+      link_preview_options: { is_disabled: this.disableWebPreview }
     });
   }
 
@@ -46,14 +53,14 @@ export class TelegramService {
     if (this.channelId) {
       await this.bot.telegram.sendMessage(this.channelId, message, {
         parse_mode: this.parseMode,
-        disable_web_page_preview: this.disableWebPreview,
+        link_preview_options: { is_disabled: this.disableWebPreview }
       });
     }
 
     if (this.groupId) {
       await this.bot.telegram.sendMessage(this.groupId, message, {
         parse_mode: this.parseMode,
-        disable_web_page_preview: this.disableWebPreview,
+        link_preview_options: { is_disabled: this.disableWebPreview }
       });
     }
 

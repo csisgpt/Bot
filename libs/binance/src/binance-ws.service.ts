@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import WebSocket from 'ws';
+import * as WebSocket from 'ws';
 import { RedisService } from '@libs/core';
 import { getPriceCacheKey, normalizeSymbol } from './market-price.service';
 
@@ -72,7 +72,7 @@ export class BinanceWsService implements OnModuleInit, OnModuleDestroy {
       this.startHeartbeat();
     });
 
-    this.ws.on('message', (data) => {
+    this.ws.on('message', (data: WebSocket.RawData) => {
       void this.handleMessage(data).catch((error) => {
         const message = error instanceof Error ? error.message : 'Unknown error';
         this.logger.warn(`Failed to handle WS message: ${message}`);
@@ -85,7 +85,7 @@ export class BinanceWsService implements OnModuleInit, OnModuleDestroy {
       this.scheduleReconnect();
     });
 
-    this.ws.on('error', (error) => {
+    this.ws.on('error', (error: Error) => {
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.warn(`Binance WS error: ${message}`);
       this.cleanupSocket();
