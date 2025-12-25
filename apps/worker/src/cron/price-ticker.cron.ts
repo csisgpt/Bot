@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { SIGNALS_QUEUE_NAME } from '@libs/core';
+import { JobRunService, SIGNALS_QUEUE_NAME } from '@libs/core';
 import { MarketPriceService, PriceSnapshot } from '@libs/binance';
 import { enqueueTextMessage, formatPriceTickerMessage } from '@libs/telegram';
 
@@ -14,6 +14,7 @@ export class PriceTickerCron implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly marketPriceService: MarketPriceService,
+    private readonly jobRunService: JobRunService,
     @InjectQueue(SIGNALS_QUEUE_NAME) private readonly signalsQueue: Queue,
   ) {}
 
@@ -43,53 +44,68 @@ export class PriceTickerCron implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleTick(): Promise<void> {
-    const instruments = this.parseList(
-      this.configService.get<string>('PRICE_TICKER_INSTRUMENTS', 'XAUTUSDT'),
-    );
-    if (instruments.length === 0) {
-      this.logger.warn('PRICE_TICKER_INSTRUMENTS is empty.');
-      return;
-    }
+    const jobRun = await this.jobRunService.start('price_ticker');
+    const stats = { snapshots: 0 };
 
-    const snapshots: PriceSnapshot[] = [];
-    for (const instrument of instruments) {
-      const snapshot = await this.marketPriceService.getLastPrice(instrument);
-      if (snapshot) {
-        snapshots.push(snapshot);
-      } else {
-        this.logger.warn(`No price available for ${instrument}.`);
+    try {
+      const instruments = this.parseList(
+        this.configService.get<string>('PRICE_TICKER_INSTRUMENTS', 'XAUTUSDT'),
+      );
+      if (instruments.length === 0) {
+        this.logger.warn('PRICE_TICKER_INSTRUMENTS is empty.');
+        await this.jobRunService.success(jobRun.id, stats);
+        return;
       }
-    }
 
-    if (snapshots.length === 0) {
-      return;
-    }
-
-    const entries = snapshots.map((snapshot) => ({
-      symbol: snapshot.symbol,
-      price: snapshot.price,
-    }));
-    const message = formatPriceTickerMessage(entries, Date.now());
-
-    const postToGroup = this.configService.get<boolean>('PRICE_TICKER_POST_TO_GROUP', true);
-    const postToChannel = this.configService.get<boolean>('PRICE_TICKER_POST_TO_CHANNEL', true);
-
-    if (postToGroup) {
-      const groupId = this.configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '');
-      if (groupId) {
-        await enqueueTextMessage(this.signalsQueue, groupId, message);
-      } else {
-        this.logger.warn('PRICE_TICKER_POST_TO_GROUP enabled but TELEGRAM_SIGNAL_GROUP_ID missing.');
+      const snapshots: PriceSnapshot[] = [];
+      for (const instrument of instruments) {
+        const snapshot = await this.marketPriceService.getLastPrice(instrument);
+        if (snapshot) {
+          snapshots.push(snapshot);
+        } else {
+          this.logger.warn(`No price available for ${instrument}.`);
+        }
       }
-    }
 
-    if (postToChannel) {
-      const channelId = this.configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '');
-      if (channelId) {
-        await enqueueTextMessage(this.signalsQueue, channelId, message);
-      } else {
-        this.logger.warn('PRICE_TICKER_POST_TO_CHANNEL enabled but TELEGRAM_SIGNAL_CHANNEL_ID missing.');
+      if (snapshots.length === 0) {
+        await this.jobRunService.success(jobRun.id, stats);
+        return;
       }
+
+      stats.snapshots = snapshots.length;
+
+      const entries = snapshots.map((snapshot) => ({
+        symbol: snapshot.symbol,
+        price: snapshot.price,
+      }));
+      const message = formatPriceTickerMessage(entries, Date.now());
+
+      const postToGroup = this.configService.get<boolean>('PRICE_TICKER_POST_TO_GROUP', true);
+      const postToChannel = this.configService.get<boolean>('PRICE_TICKER_POST_TO_CHANNEL', true);
+
+      if (postToGroup) {
+        const groupId = this.configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '');
+        if (groupId) {
+          await enqueueTextMessage(this.signalsQueue, groupId, message);
+        } else {
+          this.logger.warn('PRICE_TICKER_POST_TO_GROUP enabled but TELEGRAM_SIGNAL_GROUP_ID missing.');
+        }
+      }
+
+      if (postToChannel) {
+        const channelId = this.configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '');
+        if (channelId) {
+          await enqueueTextMessage(this.signalsQueue, channelId, message);
+        } else {
+          this.logger.warn('PRICE_TICKER_POST_TO_CHANNEL enabled but TELEGRAM_SIGNAL_CHANNEL_ID missing.');
+        }
+      }
+
+      await this.jobRunService.success(jobRun.id, stats);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await this.jobRunService.fail(jobRun.id, message, stats);
+      throw error;
     }
   }
 

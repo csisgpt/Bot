@@ -9,11 +9,13 @@ import {
   Candle,
   FeedRegistry,
   Signal,
+  SignalDeliveryService,
   SignalDedupeService,
   SignalsService,
   StrategyRegistry,
+  RoutingService,
 } from '@libs/signals';
-import { SIGNALS_QUEUE_NAME } from '@libs/core';
+import { JobRunService, SIGNALS_QUEUE_NAME } from '@libs/core';
 
 @Injectable()
 export class SignalsCron {
@@ -25,57 +27,93 @@ export class SignalsCron {
     private readonly signalDedupeService: SignalDedupeService,
     private readonly feedRegistry: FeedRegistry,
     private readonly strategyRegistry: StrategyRegistry,
+    private readonly routingService: RoutingService,
+    private readonly signalDeliveryService: SignalDeliveryService,
+    private readonly jobRunService: JobRunService,
     @InjectQueue(SIGNALS_QUEUE_NAME) private readonly signalsQueue: Queue,
   ) {}
 
   @Cron('*/1 * * * *')
   async handleCron(): Promise<void> {
-    const assetsEnabled = this.parseList(
-      this.configService.get<string>('ASSETS_ENABLED', 'GOLD,CRYPTO'),
-    )
-      .map((asset) => asset.toUpperCase())
-      .filter((asset): asset is AssetType => asset === 'GOLD' || asset === 'CRYPTO');
-    const interval = this.configService.get<string>('BINANCE_INTERVAL', '15m');
-    const limit = this.configService.get<number>('BINANCE_KLINES_LIMIT', 200);
-    const strategiesEnabled = this.parseList(
-      this.configService.get<string>('STRATEGIES_ENABLED', 'ema_rsi'),
-    );
-    const strategies = this.strategyRegistry.getByNames(strategiesEnabled);
-    const riskLevelsEnabled = this.configService.get<boolean>('ENABLE_RISK_LEVELS', true);
+    const jobRun = await this.jobRunService.start('signals_cron');
+    const stats = { signalsCreated: 0, deliveriesQueued: 0 };
 
-    for (const assetType of assetsEnabled) {
-      const feed = this.feedRegistry.getFeed(assetType);
-      const instruments = this.getInstrumentsForAsset(assetType);
+    try {
+      const assetsEnabled = this.parseList(
+        this.configService.get<string>('ASSETS_ENABLED', 'GOLD,CRYPTO'),
+      )
+        .map((asset) => asset.toUpperCase())
+        .filter((asset): asset is AssetType => asset === 'GOLD' || asset === 'CRYPTO');
+      const interval = this.configService.get<string>('BINANCE_INTERVAL', '15m');
+      const limit = this.configService.get<number>('BINANCE_KLINES_LIMIT', 200);
+      const strategiesEnabled = this.parseList(
+        this.configService.get<string>('STRATEGIES_ENABLED', 'ema_rsi'),
+      );
+      const strategies = this.strategyRegistry.getByNames(strategiesEnabled);
+      const riskLevelsEnabled = this.configService.get<boolean>('ENABLE_RISK_LEVELS', true);
 
-      for (const instrument of instruments) {
-        try {
-          const candles = await feed.getCandles({ instrument, interval, limit });
-          if (candles.length < 2) {
-            continue;
-          }
+      for (const assetType of assetsEnabled) {
+        const feed = this.feedRegistry.getFeed(assetType);
+        const instruments = this.getInstrumentsForAsset(assetType);
 
-          for (const strategy of strategies) {
-            const rawSignal = strategy.run({ candles, instrument, interval, assetType });
-            if (!rawSignal) {
+        for (const instrument of instruments) {
+          try {
+            const candles = await feed.getCandles({ instrument, interval, limit });
+            if (candles.length < 2) {
               continue;
             }
 
-            const signal = riskLevelsEnabled ? this.attachRiskLevels(rawSignal, candles) : rawSignal;
-            const shouldProcess = await this.signalDedupeService.isAllowed(signal);
-            if (!shouldProcess) {
-              continue;
+            for (const strategy of strategies) {
+              const rawSignal = strategy.run({ candles, instrument, interval, assetType });
+              if (!rawSignal) {
+                continue;
+              }
+
+              const signal = riskLevelsEnabled ? this.attachRiskLevels(rawSignal, candles) : rawSignal;
+              const shouldProcess = await this.signalDedupeService.isAllowed(signal);
+              if (!shouldProcess) {
+                continue;
+              }
+
+              const storedSignal = await this.signalsService.storeSignal(signal);
+              if (!storedSignal) {
+                continue;
+              }
+
+              stats.signalsCreated += 1;
+
+              const destinations = await this.routingService.resolveDestinations(signal);
+              const deliveries = await this.signalDeliveryService.createPendingDeliveries(
+                storedSignal.id,
+                destinations,
+              );
+
+              for (const delivery of deliveries) {
+                await this.signalsQueue.add(
+                  'sendTelegramDelivery',
+                  { deliveryId: delivery.id },
+                  {
+                    attempts: 3,
+                    removeOnComplete: true,
+                    removeOnFail: { count: 50 },
+                  },
+                );
+              }
+
+              stats.deliveriesQueued += deliveries.length;
             }
-            await this.signalsService.storeSignal(signal);
-            await this.signalsQueue.add('sendTelegramSignal', signal, {
-              removeOnComplete: true,
-              removeOnFail: { count: 50 },
-            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            this.logger.error(`Failed to process ${assetType}/${instrument}: ${message}`);
           }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          this.logger.error(`Failed to process ${assetType}/${instrument}: ${message}`);
         }
       }
+
+      await this.jobRunService.success(jobRun.id, stats);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await this.jobRunService.fail(jobRun.id, message, stats);
+      throw error;
     }
   }
 
@@ -120,6 +158,10 @@ export class SignalsCron {
     const slMultiplier = this.configService.get<number>('SL_ATR_MULTIPLIER', 1.5);
     const tp1Multiplier = this.configService.get<number>('TP1_ATR_MULTIPLIER', 2);
     const tp2Multiplier = this.configService.get<number>('TP2_ATR_MULTIPLIER', 3);
+
+    if (signal.price === null) {
+      return signal;
+    }
 
     if (signal.side === 'BUY') {
       return {

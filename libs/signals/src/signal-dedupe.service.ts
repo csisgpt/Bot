@@ -2,13 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '@libs/core';
 import { Signal } from './types';
-
-const toTimeBucket = (time: number): number => Math.floor(time / 60000);
-
-export const buildSignalDedupeKey = (signal: Signal): string => {
-  const source = signal.source ?? 'BINANCE';
-  return `signal:${source}:${signal.assetType}:${signal.instrument}:${signal.interval}:${signal.strategy}:${signal.side}:${toTimeBucket(signal.time)}`;
-};
+import { buildSignalDedupeKey } from './dedupe';
 
 export const buildSignalCooldownKey = (signal: Signal): string => {
   const source = signal.source ?? 'BINANCE';
@@ -44,3 +38,5 @@ export class SignalDedupeService {
     return true;
   }
 }
+
+export { buildSignalDedupeKey };

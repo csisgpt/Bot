@@ -44,7 +44,17 @@ Signals bot for Binance Spot data that generates trading alerts and sends them t
    pnpm prisma:migrate:deploy
    ```
 
-5. Start API and worker in separate terminals:
+   Migration notes:
+   - `Signal.price` is now stored as `NUMERIC(20,8)`; the migration casts existing floats safely.
+   - Existing signals get a one-time `dedupeKey` based on the legacy record id.
+
+5. Seed base routing data (optional, idempotent):
+
+   ```bash
+   curl -X POST http://localhost:3000/admin/seed
+   ```
+
+6. Start API and worker in separate terminals:
 
    ```bash
    pnpm dev:api
@@ -54,9 +64,13 @@ Signals bot for Binance Spot data that generates trading alerts and sends them t
 ## Endpoints
 
 - `GET /health` (API)
+- `GET /health/db` (API)
 - `GET /health` (worker)
 - `POST /admin/test-telegram`
+- `POST /admin/seed`
 - `POST /webhooks/tradingview`
+- `GET /signals`
+- `GET /deliveries`
 
 For the admin Telegram test endpoint, provide either:
 
@@ -123,6 +137,16 @@ Use `ATR_PERIOD`, `SL_ATR_MULTIPLIER`, `TP1_ATR_MULTIPLIER`, and `TP2_ATR_MULTIP
 
 - `SIGNAL_DEDUPE_TTL_SECONDS` prevents duplicate alerts for the same candle/strategy/side.
 - `SIGNAL_MIN_COOLDOWN_SECONDS` enforces a cooldown per asset + instrument + strategy.
+
+### Routing & deliveries
+
+Signals are routed through `RoutingRule` rows to active `TelegramDestination` entries. A rule matches when all configured filters match (asset type, instrument, strategy, interval, confidence). If no routing rules exist, the system falls back to `TELEGRAM_CHAT_ID` or the legacy channel/group env vars.
+
+On startup, the app can seed a default strategy, instruments, and a catch-all routing rule to the default destination. This seed is idempotent and can be re-run via `POST /admin/seed` or automatically on startup with `SEED_ON_STARTUP=true`.
+
+Default destination envs:
+- `TELEGRAM_CHAT_ID` + `TELEGRAM_CHAT_TYPE` (GROUP or CHANNEL)
+- `TELEGRAM_SIGNAL_CHANNEL_ID` / `TELEGRAM_SIGNAL_GROUP_ID`
 
 ### TradingView webhook (paid plan)
 

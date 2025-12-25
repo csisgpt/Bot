@@ -4,7 +4,7 @@ export type SignalKind = 'ENTRY' | 'EXIT' | 'ALERT';
 
 export type SignalSide = 'BUY' | 'SELL' | 'NEUTRAL';
 
-export type SignalSource = 'BINANCE' | 'TRADINGVIEW';
+export type SignalSource = 'BINANCE' | 'TRADINGVIEW' | 'MANUAL';
 
 export interface SignalLevels {
   entry?: number;

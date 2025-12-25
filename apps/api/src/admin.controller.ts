@@ -1,12 +1,14 @@
 import { Controller, Headers, HttpException, HttpStatus, Post } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TelegramService } from '@libs/telegram';
+import { SeedService } from '@libs/signals';
 
 @Controller('admin')
 export class AdminController {
   constructor(
     private readonly configService: ConfigService,
     private readonly telegramService: TelegramService,
+    private readonly seedService: SeedService,
   ) {}
 
   @Post('test-telegram')
@@ -30,5 +32,11 @@ export class AdminController {
     await this.telegramService.sendTestMessage(message);
 
     return { ok: true };
+  }
+
+  @Post('seed')
+  async seed(): Promise<{ ok: true; details: Record<string, number> }> {
+    const details = await this.seedService.seed();
+    return { ok: true, details };
   }
 }

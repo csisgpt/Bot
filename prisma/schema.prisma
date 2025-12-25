@@ -7,24 +7,164 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AssetType {
+  GOLD
+  CRYPTO
+}
+
+enum SignalSource {
+  BINANCE
+  TRADINGVIEW
+  MANUAL
+}
+
+enum SignalKind {
+  ENTRY
+  EXIT
+  ALERT
+}
+
+enum SignalSide {
+  BUY
+  SELL
+  NEUTRAL
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum JobRunStatus {
+  STARTED
+  SUCCESS
+  FAILED
+}
+
+enum TelegramDestinationType {
+  GROUP
+  CHANNEL
+}
+
 model Signal {
-  id        String   @id @default(uuid())
-  source    String   @default("BINANCE")
-  assetType String
+  id         String      @id @default(uuid())
+  source     SignalSource @default(BINANCE)
+  assetType  AssetType
   instrument String
-  interval  String
-  strategy  String
-  kind      String
-  side      String
-  time      DateTime
-  price     Float?
+  interval   String
+  strategy   String
+  kind       SignalKind
+  side       SignalSide
+  time       DateTime
+  price      Decimal?    @db.Numeric(20, 8)
   confidence Int
-  tags      String[]
-  reason    String
-  levels    Json?
+  tags       String[]
+  reason     String
+  levels     Json?
   externalId String?
   rawPayload Json?
-  createdAt DateTime @default(now())
+  dedupeKey  String
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
-  @@index([assetType, instrument, interval, time])
+  deliveries SignalDelivery[]
+
+  @@unique([source, dedupeKey])
+  @@index([assetType, instrument, interval, time(sort: Desc)])
+  @@index([strategy, time(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
+model Instrument {
+  id         String    @id @default(uuid())
+  assetType  AssetType
+  symbol     String    @unique
+  name       String?
+  isActive   Boolean   @default(true)
+  priceScale Int?
+  meta       Json?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  routingRules RoutingRule[]
+}
+
+model Strategy {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  version   String?
+  config    Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  routingRules RoutingRule[]
+}
+
+model TelegramDestination {
+  id              String                   @id @default(uuid())
+  destinationType TelegramDestinationType
+  chatId          String
+  title           String?
+  isActive        Boolean                  @default(true)
+  messageStyle    Json?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  routingRules RoutingRule[]
+  deliveries   SignalDelivery[]
+
+  @@unique([destinationType, chatId])
+}
+
+model RoutingRule {
+  id            String   @id @default(uuid())
+  assetType     AssetType?
+  instrumentId  String?
+  strategyId    String?
+  interval      String?
+  minConfidence Int?
+  destinationId String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  instrument  Instrument?         @relation(fields: [instrumentId], references: [id])
+  strategy    Strategy?           @relation(fields: [strategyId], references: [id])
+  destination TelegramDestination @relation(fields: [destinationId], references: [id])
+}
+
+model SignalDelivery {
+  id                String         @id @default(uuid())
+  signalId          String
+  destinationId     String
+  status            DeliveryStatus @default(PENDING)
+  attempt           Int            @default(0)
+  telegramMessageId String?
+  error             String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  signal      Signal              @relation(fields: [signalId], references: [id])
+  destination TelegramDestination @relation(fields: [destinationId], references: [id])
+
+  @@unique([signalId, destinationId])
+  @@index([status, createdAt])
+  @@index([destinationId, createdAt])
+}
+
+model JobRun {
+  id        String       @id @default(uuid())
+  jobName   String
+  status    JobRunStatus
+  startedAt DateTime     @default(now())
+  endedAt   DateTime?
+  meta      Json?
+  error     String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([jobName, startedAt(sort: Desc)])
 }
