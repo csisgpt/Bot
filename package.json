@@ -17,7 +17,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke:test": "ts-node scripts/smoke-test.ts"
   },
   "dependencies": {
     "@nestjs/bullmq": "^10.1.1",
@@ -31,6 +32,7 @@
     "ioredis": "^5.4.1",
     "@prisma/client": "^5.13.0",
     "prisma": "^5.13.0",
+    "dotenv": "^16.4.5",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
     "telegraf": "^4.16.3",
