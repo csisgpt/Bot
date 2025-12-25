@@ -1,6 +1,8 @@
 import { Signal } from '@libs/signals';
 
 const formatNumber = (value: number): string => value.toFixed(4);
+const formatPrice = (value: number | null | undefined): string =>
+  value === null || value === undefined ? 'N/A' : formatNumber(value);
 
 const formatLevels = (levels?: Signal['levels']): string[] => {
   if (!levels) {
@@ -32,7 +34,7 @@ export const formatSignalMessage = (signal: Signal): string => {
     `<b>Instrument:</b> ${signal.instrument}`,
     `<b>Interval:</b> ${signal.interval}`,
     `<b>Strategy:</b> ${signal.strategy}`,
-    `<b>Price:</b> ${formatNumber(signal.price)}`,
+    `<b>Price:</b> ${formatPrice(signal.price)}`,
     `<b>Confidence:</b> ${signal.confidence}%`,
     `<b>Tags:</b> ${signal.tags.join(', ') || 'n/a'}`,
     `<b>Reason:</b> ${signal.reason}`,

@@ -53,7 +53,7 @@ export class TradingViewWebhookController {
       },
       {
         removeOnComplete: true,
-        removeOnFail: true,
+        removeOnFail: { count: 50 },
       },
     );
 

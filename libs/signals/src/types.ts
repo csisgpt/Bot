@@ -21,7 +21,7 @@ export interface Signal {
   strategy: string;
   kind: SignalKind;
   side: SignalSide;
-  price: number;
+  price: number | null;
   time: number;
   confidence: number;
   tags: string[];

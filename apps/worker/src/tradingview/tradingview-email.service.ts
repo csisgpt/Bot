@@ -101,7 +101,7 @@ export class TradingViewEmailIngestService implements OnModuleInit, OnModuleDest
               },
               payloadRaw: payload,
             },
-            { removeOnComplete: true, removeOnFail: true },
+            { removeOnComplete: true, removeOnFail: { count: 50 } },
           );
         }
 

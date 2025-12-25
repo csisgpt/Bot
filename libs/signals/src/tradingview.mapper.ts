@@ -68,7 +68,7 @@ const normalizeTags = (value: unknown): string[] => {
 
 export const parseTradingViewPayload = (
   payloadRaw: unknown,
-): { payload: Record<string, unknown>; rawText?: string } => {
+): { payload: Record<string, unknown>; rawText?: string; parseError?: string } => {
   if (typeof payloadRaw === 'string') {
     const trimmed = payloadRaw.trim();
     if (trimmed.length === 0) {
@@ -79,7 +79,7 @@ export const parseTradingViewPayload = (
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
       return { payload: parsed, rawText: payloadRaw };
     } catch {
-      return { payload: { message: trimmed }, rawText: payloadRaw };
+      return { payload: { message: trimmed }, rawText: payloadRaw, parseError: 'Invalid JSON' };
     }
   }
 
@@ -104,7 +104,7 @@ export const mapTradingViewPayloadToSignal = (
   const strategy = (payload.strategy ?? defaults.strategy) as string;
   const time = parseTime(payload.time ?? payload.timestamp) ?? Date.now();
   const parsedPrice = parseNumber(payload.price);
-  const price = parsedPrice ?? priceFallback ?? 0;
+  const price = parsedPrice ?? priceFallback ?? null;
   const confidence = parseNumber(payload.confidence) ?? 0;
   const tags = normalizeTags(payload.tags);
   const baseReason = (payload.reason ?? payload.message ?? 'TradingView alert') as string;

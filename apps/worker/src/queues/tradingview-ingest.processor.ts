@@ -2,7 +2,7 @@ import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Queue } from 'bullmq';
-import { SIGNALS_QUEUE_NAME } from '@libs/core';
+import { SIGNALS_QUEUE_CONCURRENCY, SIGNALS_QUEUE_NAME } from '@libs/core';
 import {
   FeedRegistry,
   Signal,
@@ -20,7 +20,7 @@ interface TradingViewIngestJob {
 }
 
 @Injectable()
-@Processor(SIGNALS_QUEUE_NAME)
+@Processor(SIGNALS_QUEUE_NAME, { concurrency: SIGNALS_QUEUE_CONCURRENCY })
 export class TradingViewIngestProcessor extends WorkerHost {
   private readonly logger = new Logger(TradingViewIngestProcessor.name);
 
@@ -39,22 +39,47 @@ export class TradingViewIngestProcessor extends WorkerHost {
       return;
     }
 
-    const { payloadRaw } = job.data;
-    const { payload } = parseTradingViewPayload(payloadRaw);
-    const defaults = this.getDefaults();
-    const priceFallback = await this.resolvePriceFallback(payload, defaults);
-    const signal = mapTradingViewPayloadToSignal(payloadRaw, defaults, priceFallback);
+    try {
+      const { payloadRaw } = job.data;
+      const { payload, parseError } = parseTradingViewPayload(payloadRaw);
+      if (parseError) {
+        this.logger.warn(
+          `TradingView payload parse error for job ${job.id ?? 'unknown'}: ${parseError}`,
+        );
+      }
 
-    const shouldProcess = await this.signalDedupeService.isAllowed(signal);
-    if (!shouldProcess) {
-      return;
+      const defaults = this.getDefaults();
+      const priceFallback = await this.resolvePriceFallback(payload, defaults);
+      const signal = mapTradingViewPayloadToSignal(payloadRaw, defaults, priceFallback);
+
+      if (signal.price === null) {
+        this.logger.warn(
+          `TradingView price unavailable for job ${job.id ?? 'unknown'} (${signal.instrument} ${signal.interval})`,
+        );
+      }
+
+      const shouldProcess = await this.signalDedupeService.isAllowed(signal);
+      if (!shouldProcess) {
+        return;
+      }
+
+      await this.signalsService.storeSignal(signal);
+      await this.signalsQueue.add('sendTelegramSignal', signal, {
+        removeOnComplete: true,
+        removeOnFail: { count: 50 },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      const { payloadRaw } = job.data;
+      const { payload } = parseTradingViewPayload(payloadRaw);
+      const instrument = (payload.instrument ?? payload.symbol ?? 'unknown') as string;
+      const interval = (payload.interval ?? payload.timeframe ?? 'unknown') as string;
+      const strategy = (payload.strategy ?? 'unknown') as string;
+      this.logger.error(
+        `TradingView ingest failed for job ${job.id ?? 'unknown'} (${instrument} ${interval} ${strategy}): ${message}`,
+      );
+      throw error;
     }
-
-    await this.signalsService.storeSignal(signal);
-    await this.signalsQueue.add('sendTelegramSignal', signal, {
-      removeOnComplete: true,
-      removeOnFail: true,
-    });
   }
 
   private getDefaults(): {

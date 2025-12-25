@@ -68,7 +68,7 @@ export class SignalsCron {
             await this.signalsService.storeSignal(signal);
             await this.signalsQueue.add('sendTelegramSignal', signal, {
               removeOnComplete: true,
-              removeOnFail: true,
+              removeOnFail: { count: 50 },
             });
           }
         } catch (error) {

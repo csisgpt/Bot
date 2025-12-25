@@ -94,4 +94,14 @@ describe('TradingView ingest', () => {
     expect(storedSignal.price).toBe(2000);
     expect(addQueue).toHaveBeenCalled();
   });
+
+  it('keeps price null when missing and no fallback', () => {
+    const signal = mapTradingViewPayloadToSignal(
+      { signal: 'BUY', assetType: 'GOLD', instrument: 'XAUTUSDT' },
+      { assetType: 'GOLD', instrument: 'XAUTUSDT', interval: '15m', strategy: 'tradingview' },
+    );
+
+    expect(signal.price).toBeNull();
+    expect(signal.reason).toContain('price unavailable');
+  });
 });

@@ -17,7 +17,7 @@ model Signal {
   kind      String
   side      String
   time      DateTime
-  price     Float
+  price     Float?
   confidence Int
   tags      String[]
   reason    String
