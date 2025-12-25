@@ -62,6 +62,7 @@ describe('TradingView ingest', () => {
   it('fills missing price via price provider', async () => {
     const storeSignal = vi.fn();
     const addQueue = vi.fn();
+    storeSignal.mockResolvedValue({ id: 'signal-1' });
     const processor = new TradingViewIngestProcessor(
       {
         get: (key: string, fallback?: string) => {
@@ -81,6 +82,12 @@ describe('TradingView ingest', () => {
         getFeed: () => ({
           getCandles: async () => [{ close: 2000 }],
         }),
+      } as never,
+      {
+        resolveDestinations: async () => [{ id: 'dest-1' }],
+      } as never,
+      {
+        createPendingDeliveries: async () => [{ id: 'delivery-1' }],
       } as never,
       { add: addQueue } as never,
     );

@@ -1,8 +1,13 @@
+import { Prisma, Signal as PrismaSignal } from '@prisma/client';
 import { Signal } from '@libs/signals';
 
 const formatNumber = (value: number): string => value.toFixed(4);
-const formatPrice = (value: number | null | undefined): string =>
-  value === null || value === undefined ? 'N/A' : formatNumber(value);
+
+const toNumber = (value: number | Prisma.Decimal): number =>
+  value instanceof Prisma.Decimal ? value.toNumber() : value;
+
+const formatPrice = (value: number | Prisma.Decimal | null | undefined): string =>
+  value === null || value === undefined ? 'N/A' : formatNumber(toNumber(value));
 
 const formatLevels = (levels?: Signal['levels']): string[] => {
   if (!levels) {
@@ -26,7 +31,11 @@ const formatLevels = (levels?: Signal['levels']): string[] => {
   return rows;
 };
 
-export const formatSignalMessage = (signal: Signal): string => {
+type SignalLike = Signal | PrismaSignal;
+
+const toDate = (value: number | Date): Date => (value instanceof Date ? value : new Date(value));
+
+export const formatSignalMessage = (signal: SignalLike): string => {
   const header = signal.side === 'BUY' ? '🟢 BUY' : signal.side === 'SELL' ? '🔴 SELL' : '⚪️ NEUTRAL';
   const lines = [
     `<b>${header}</b>`,
@@ -34,19 +43,19 @@ export const formatSignalMessage = (signal: Signal): string => {
     `<b>Instrument:</b> ${signal.instrument}`,
     `<b>Interval:</b> ${signal.interval}`,
     `<b>Strategy:</b> ${signal.strategy}`,
-    `<b>Price:</b> ${formatPrice(signal.price)}`,
+    `<b>Price:</b> ${formatPrice(signal.price as number | Prisma.Decimal | null | undefined)}`,
     `<b>Confidence:</b> ${signal.confidence}%`,
     `<b>Tags:</b> ${signal.tags.join(', ') || 'n/a'}`,
     `<b>Reason:</b> ${signal.reason}`,
   ];
 
-  const levels = formatLevels(signal.levels);
+  const levels = formatLevels(signal.levels as Signal['levels']);
   if (levels.length > 0) {
     lines.push('<b>Levels</b>');
     lines.push(...levels);
   }
 
-  lines.push(`<b>Time:</b> ${new Date(signal.time).toISOString()}`);
+  lines.push(`<b>Time:</b> ${toDate(signal.time as number | Date).toISOString()}`);
 
   return lines.join('\n');
 };

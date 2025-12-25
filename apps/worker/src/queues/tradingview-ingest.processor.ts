@@ -6,10 +6,12 @@ import { SIGNALS_QUEUE_CONCURRENCY, SIGNALS_QUEUE_NAME } from '@libs/core';
 import {
   FeedRegistry,
   Signal,
+  SignalDeliveryService,
   SignalDedupeService,
   SignalsService,
   mapTradingViewPayloadToSignal,
   parseTradingViewPayload,
+  RoutingService,
 } from '@libs/signals';
 
 interface TradingViewIngestJob {
@@ -29,6 +31,8 @@ export class TradingViewIngestProcessor extends WorkerHost {
     private readonly signalsService: SignalsService,
     private readonly signalDedupeService: SignalDedupeService,
     private readonly feedRegistry: FeedRegistry,
+    private readonly routingService: RoutingService,
+    private readonly signalDeliveryService: SignalDeliveryService,
     @InjectQueue(SIGNALS_QUEUE_NAME) private readonly signalsQueue: Queue,
   ) {
     super();
@@ -63,11 +67,28 @@ export class TradingViewIngestProcessor extends WorkerHost {
         return;
       }
 
-      await this.signalsService.storeSignal(signal);
-      await this.signalsQueue.add('sendTelegramSignal', signal, {
-        removeOnComplete: true,
-        removeOnFail: { count: 50 },
-      });
+      const storedSignal = await this.signalsService.storeSignal(signal);
+      if (!storedSignal) {
+        return;
+      }
+
+      const destinations = await this.routingService.resolveDestinations(signal);
+      const deliveries = await this.signalDeliveryService.createPendingDeliveries(
+        storedSignal.id,
+        destinations,
+      );
+
+      for (const delivery of deliveries) {
+        await this.signalsQueue.add(
+          'sendTelegramDelivery',
+          { deliveryId: delivery.id },
+          {
+            attempts: 3,
+            removeOnComplete: true,
+            removeOnFail: { count: 50 },
+          },
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       const { payloadRaw } = job.data;
