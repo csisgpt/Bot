@@ -7,6 +7,7 @@ import { SignalsModule } from '@libs/signals';
 import { TelegramModule } from '@libs/telegram';
 import { HealthController } from './health.controller';
 import { SignalsCron } from './cron/signals.cron';
+import { PriceTickerCron } from './cron/price-ticker.cron';
 import { SendTelegramProcessor } from './queues/send-telegram.processor';
 import { ConfigService } from '@nestjs/config';
 import { TradingViewIngestProcessor } from './queues/tradingview-ingest.processor';
@@ -31,6 +32,7 @@ import { TradingViewEmailIngestService } from './tradingview/tradingview-email.s
   controllers: [HealthController],
   providers: [
     SignalsCron,
+    PriceTickerCron,
     SendTelegramProcessor,
     TradingViewIngestProcessor,
     TradingViewEmailIngestService,

@@ -17,9 +17,15 @@ export class BinanceClient {
   private readonly http: AxiosInstance;
 
   constructor(configService: ConfigService) {
+    const baseURL =
+      configService.get<string>('BINANCE_REST_BASE_URL') ??
+      configService.get<string>('BINANCE_BASE_URL', 'https://api.binance.com');
+    const timeout =
+      configService.get<number>('BINANCE_REST_TIMEOUT_MS') ??
+      configService.get<number>('BINANCE_REQUEST_TIMEOUT_MS', 10000);
     this.http = axios.create({
-      baseURL: configService.get<string>('BINANCE_BASE_URL', 'https://api.binance.com'),
-      timeout: 10000,
+      baseURL,
+      timeout,
     });
   }
 
@@ -41,5 +47,17 @@ export class BinanceClient {
       volume: Number(item[5]),
       closeTime: Number(item[6]),
     }));
+  }
+
+  async getLastPrice(symbol: string): Promise<{ symbol: string; price: number; ts: number }> {
+    const response = await this.http.get('/api/v3/ticker/price', {
+      params: { symbol },
+    });
+    const payload = response.data as { symbol: string; price: string };
+    return {
+      symbol: payload.symbol,
+      price: Number(payload.price),
+      ts: Date.now(),
+    };
   }
 }
