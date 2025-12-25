@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullModule } from '@nestjs/bullmq';
-import { CoreModule } from '@libs/core';
+import { CoreModule, createRedisConnection } from '@libs/core';
 import { BinanceModule } from '@libs/binance';
 import { SignalsModule } from '@libs/signals';
 import { TelegramModule } from '@libs/telegram';
@@ -21,11 +21,7 @@ import { ConfigService } from '@nestjs/config';
       imports: [CoreModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST', 'localhost'),
-          port: configService.get<number>('REDIS_PORT', 6379),
-          password: configService.get<string>('REDIS_PASSWORD'),
-        },
+        connection: createRedisConnection(configService),
       }),
     }),
     BullModule.registerQueue({ name: 'signals' }),
