@@ -15,34 +15,14 @@ const signal_dedupe_service_1 = require("./signal-dedupe.service");
 const binance_spot_candle_feed_1 = require("./feeds/binance-spot-candle-feed");
 const feed_registry_1 = require("./feeds/feed.registry");
 const strategy_registry_1 = require("./strategies/strategy.registry");
-const routing_service_1 = require("./routing.service");
-const signal_delivery_service_1 = require("./signal-delivery.service");
-const seed_service_1 = require("./seed.service");
 let SignalsModule = class SignalsModule {
 };
 exports.SignalsModule = SignalsModule;
 exports.SignalsModule = SignalsModule = __decorate([
     (0, common_1.Module)({
         imports: [core_1.CoreModule, binance_1.BinanceModule],
-        providers: [
-            signals_service_1.SignalsService,
-            signal_dedupe_service_1.SignalDedupeService,
-            binance_spot_candle_feed_1.BinanceSpotCandleFeed,
-            feed_registry_1.FeedRegistry,
-            strategy_registry_1.StrategyRegistry,
-            routing_service_1.RoutingService,
-            signal_delivery_service_1.SignalDeliveryService,
-            seed_service_1.SeedService,
-        ],
-        exports: [
-            signals_service_1.SignalsService,
-            signal_dedupe_service_1.SignalDedupeService,
-            feed_registry_1.FeedRegistry,
-            strategy_registry_1.StrategyRegistry,
-            routing_service_1.RoutingService,
-            signal_delivery_service_1.SignalDeliveryService,
-            seed_service_1.SeedService,
-        ],
+        providers: [signals_service_1.SignalsService, signal_dedupe_service_1.SignalDedupeService, binance_spot_candle_feed_1.BinanceSpotCandleFeed, feed_registry_1.FeedRegistry, strategy_registry_1.StrategyRegistry],
+        exports: [signals_service_1.SignalsService, signal_dedupe_service_1.SignalDedupeService, feed_registry_1.FeedRegistry, strategy_registry_1.StrategyRegistry],
     })
 ], SignalsModule);
 //# sourceMappingURL=signals.module.js.map

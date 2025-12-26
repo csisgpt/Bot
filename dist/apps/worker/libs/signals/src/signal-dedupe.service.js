@@ -9,12 +9,16 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildSignalDedupeKey = exports.SignalDedupeService = exports.buildSignalCooldownKey = void 0;
+exports.SignalDedupeService = exports.buildSignalCooldownKey = exports.buildSignalDedupeKey = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const core_1 = require("../../core/src/index");
-const dedupe_1 = require("./dedupe");
-Object.defineProperty(exports, "buildSignalDedupeKey", { enumerable: true, get: function () { return dedupe_1.buildSignalDedupeKey; } });
+const toTimeBucket = (time) => Math.floor(time / 60000);
+const buildSignalDedupeKey = (signal) => {
+    const source = signal.source ?? 'BINANCE';
+    return `signal:${source}:${signal.assetType}:${signal.instrument}:${signal.interval}:${signal.strategy}:${signal.side}:${toTimeBucket(signal.time)}`;
+};
+exports.buildSignalDedupeKey = buildSignalDedupeKey;
 const buildSignalCooldownKey = (signal) => {
     const source = signal.source ?? 'BINANCE';
     return `cooldown:${source}:${signal.assetType}:${signal.instrument}:${signal.interval}:${signal.strategy}`;
@@ -26,22 +30,33 @@ let SignalDedupeService = class SignalDedupeService {
         this.configService = configService;
     }
     async isAllowed(signal) {
-        const dedupeTtl = this.configService.get('SIGNAL_DEDUPE_TTL_SECONDS', 7200);
-        const cooldownSeconds = this.configService.get('SIGNAL_MIN_COOLDOWN_SECONDS', 300);
-        const dedupeKey = (0, dedupe_1.buildSignalDedupeKey)(signal);
-        const cooldownKey = (0, exports.buildSignalCooldownKey)(signal);
-        const [dedupeExists, cooldownExists] = await Promise.all([
-            this.redisService.get(dedupeKey),
-            this.redisService.get(cooldownKey),
-        ]);
-        if (dedupeExists || cooldownExists) {
-            return false;
+        const sendAllTv = this.configService.get('TRADINGVIEW_SEND_ALL', 'true') === 'true';
+        const source = signal.source ?? 'BINANCE';
+        if (sendAllTv && source === 'TRADINGVIEW') {
+            return true;
         }
-        await Promise.all([
-            this.redisService.set(dedupeKey, '1', 'EX', dedupeTtl),
-            this.redisService.set(cooldownKey, '1', 'EX', cooldownSeconds),
-        ]);
+        const dedupeTtl = this.getNumber('SIGNAL_DEDUPE_TTL_SECONDS', 7200);
+        const cooldownSeconds = this.getNumber('SIGNAL_MIN_COOLDOWN_SECONDS', 300);
+        const dedupeKey = (0, exports.buildSignalDedupeKey)(signal);
+        const cooldownKey = (0, exports.buildSignalCooldownKey)(signal);
+        const dedupeSet = await this.redisService.set(dedupeKey, '1', 'EX', dedupeTtl, 'NX');
+        if (dedupeSet !== 'OK')
+            return false;
+        if (cooldownSeconds > 0) {
+            const cooldownSet = await this.redisService.set(cooldownKey, '1', 'EX', cooldownSeconds, 'NX');
+            if (cooldownSet !== 'OK') {
+                await this.redisService.del(dedupeKey);
+                return false;
+            }
+        }
         return true;
+    }
+    getNumber(key, fallback) {
+        const raw = this.configService.get(key);
+        if (raw === undefined || raw === null || raw === '')
+            return fallback;
+        const n = typeof raw === 'number' ? raw : Number(raw);
+        return Number.isFinite(n) ? n : fallback;
     }
 };
 exports.SignalDedupeService = SignalDedupeService;

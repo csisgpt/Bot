@@ -22,8 +22,6 @@ export declare const envSchema: z.ZodObject<{
     TELEGRAM_SIGNAL_CHANNEL_TITLE: z.ZodOptional<z.ZodString>;
     TELEGRAM_SIGNAL_GROUP_ID: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     TELEGRAM_SIGNAL_GROUP_TITLE: z.ZodOptional<z.ZodString>;
-    TELEGRAM_CHAT_ID: z.ZodDefault<z.ZodOptional<z.ZodString>>;
-    TELEGRAM_CHAT_TYPE: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     TELEGRAM_OWNER_USER_ID: z.ZodOptional<z.ZodString>;
     TELEGRAM_OWNER_USERNAME: z.ZodOptional<z.ZodString>;
     OWNER_USER_ID: z.ZodOptional<z.ZodString>;
@@ -70,9 +68,6 @@ export declare const envSchema: z.ZodObject<{
     TP2_ATR_MULTIPLIER: z.ZodEffects<z.ZodDefault<z.ZodNumber>, number, unknown>;
     SIGNAL_DEDUPE_TTL_SECONDS: z.ZodEffects<z.ZodDefault<z.ZodNumber>, number, unknown>;
     SIGNAL_MIN_COOLDOWN_SECONDS: z.ZodEffects<z.ZodDefault<z.ZodNumber>, number, unknown>;
-    SEED_ON_STARTUP: z.ZodEffects<z.ZodDefault<z.ZodBoolean>, boolean, unknown>;
-    DEFAULT_STRATEGY_KEY: z.ZodDefault<z.ZodOptional<z.ZodString>>;
-    DEFAULT_STRATEGY_NAME: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     TRADINGVIEW_WEBHOOK_ENABLED: z.ZodEffects<z.ZodDefault<z.ZodBoolean>, boolean, unknown>;
     TRADINGVIEW_WEBHOOK_SECRET: z.ZodOptional<z.ZodString>;
     TRADINGVIEW_DEFAULT_ASSET_TYPE: z.ZodDefault<z.ZodOptional<z.ZodString>>;
@@ -103,8 +98,6 @@ export declare const envSchema: z.ZodObject<{
     TELEGRAM_BOT_TOKEN: string;
     TELEGRAM_SIGNAL_CHANNEL_ID: string;
     TELEGRAM_SIGNAL_GROUP_ID: string;
-    TELEGRAM_CHAT_ID: string;
-    TELEGRAM_CHAT_TYPE: string;
     TELEGRAM_PARSE_MODE: string;
     TELEGRAM_DISABLE_WEB_PAGE_PREVIEW: boolean;
     PRICE_TICKER_ENABLED: boolean;
@@ -147,9 +140,6 @@ export declare const envSchema: z.ZodObject<{
     TP2_ATR_MULTIPLIER: number;
     SIGNAL_DEDUPE_TTL_SECONDS: number;
     SIGNAL_MIN_COOLDOWN_SECONDS: number;
-    SEED_ON_STARTUP: boolean;
-    DEFAULT_STRATEGY_KEY: string;
-    DEFAULT_STRATEGY_NAME: string;
     TRADINGVIEW_WEBHOOK_ENABLED: boolean;
     TRADINGVIEW_DEFAULT_ASSET_TYPE: string;
     TRADINGVIEW_DEFAULT_INSTRUMENT: string;
@@ -198,8 +188,6 @@ export declare const envSchema: z.ZodObject<{
     TELEGRAM_SIGNAL_CHANNEL_TITLE?: string | undefined;
     TELEGRAM_SIGNAL_GROUP_ID?: string | undefined;
     TELEGRAM_SIGNAL_GROUP_TITLE?: string | undefined;
-    TELEGRAM_CHAT_ID?: string | undefined;
-    TELEGRAM_CHAT_TYPE?: string | undefined;
     TELEGRAM_OWNER_USER_ID?: string | undefined;
     TELEGRAM_OWNER_USERNAME?: string | undefined;
     OWNER_USER_ID?: string | undefined;
@@ -246,9 +234,6 @@ export declare const envSchema: z.ZodObject<{
     TP2_ATR_MULTIPLIER?: unknown;
     SIGNAL_DEDUPE_TTL_SECONDS?: unknown;
     SIGNAL_MIN_COOLDOWN_SECONDS?: unknown;
-    SEED_ON_STARTUP?: unknown;
-    DEFAULT_STRATEGY_KEY?: string | undefined;
-    DEFAULT_STRATEGY_NAME?: string | undefined;
     TRADINGVIEW_WEBHOOK_ENABLED?: unknown;
     TRADINGVIEW_WEBHOOK_SECRET?: string | undefined;
     TRADINGVIEW_DEFAULT_ASSET_TYPE?: string | undefined;

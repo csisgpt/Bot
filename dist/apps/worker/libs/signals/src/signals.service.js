@@ -11,47 +11,31 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SignalsService = void 0;
 const common_1 = require("@nestjs/common");
-const client_1 = require("@prisma/client");
 const core_1 = require("../../core/src/index");
-const dedupe_1 = require("./dedupe");
 let SignalsService = class SignalsService {
     constructor(prismaService) {
         this.prismaService = prismaService;
     }
-    async storeSignal(signal, options = {}) {
-        const dedupeKey = (0, dedupe_1.buildSignalDedupeKey)(signal);
-        const price = signal.price === null || signal.price === undefined
-            ? null
-            : new client_1.Prisma.Decimal(signal.price);
-        const persistRawPayload = options.persistRawPayload ?? true;
-        try {
-            return await this.prismaService.signal.create({
-                data: {
-                    source: signal.source ?? 'BINANCE',
-                    assetType: signal.assetType,
-                    instrument: signal.instrument,
-                    interval: signal.interval,
-                    strategy: signal.strategy,
-                    kind: signal.kind,
-                    side: signal.side,
-                    time: new Date(signal.time),
-                    price,
-                    confidence: signal.confidence,
-                    tags: signal.tags,
-                    reason: signal.reason,
-                    levels: signal.levels ?? undefined,
-                    externalId: signal.externalId ?? undefined,
-                    rawPayload: persistRawPayload ? signal.rawPayload ?? undefined : undefined,
-                    dedupeKey,
-                },
-            });
-        }
-        catch (error) {
-            if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-                return null;
-            }
-            throw error;
-        }
+    async storeSignal(signal) {
+        await this.prismaService.signal.create({
+            data: {
+                source: signal.source ?? 'BINANCE',
+                assetType: signal.assetType,
+                instrument: signal.instrument,
+                interval: signal.interval,
+                strategy: signal.strategy,
+                kind: signal.kind,
+                side: signal.side,
+                time: new Date(signal.time),
+                price: signal.price,
+                confidence: signal.confidence,
+                tags: signal.tags,
+                reason: signal.reason,
+                levels: signal.levels ? signal.levels : undefined,
+                externalId: signal.externalId ?? undefined,
+                rawPayload: signal.rawPayload ?? undefined,
+            },
+        });
     }
 };
 exports.SignalsService = SignalsService;

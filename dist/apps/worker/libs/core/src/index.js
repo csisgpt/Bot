@@ -20,5 +20,4 @@ __exportStar(require("./prisma.service"), exports);
 __exportStar(require("./queue.constants"), exports);
 __exportStar(require("./redis.connection"), exports);
 __exportStar(require("./redis.service"), exports);
-__exportStar(require("./job-run.service"), exports);
 //# sourceMappingURL=index.js.map

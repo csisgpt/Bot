@@ -17,9 +17,8 @@ const telegram_1 = require("../../../libs/telegram/src/index");
 const health_controller_1 = require("./health.controller");
 const signals_cron_1 = require("./cron/signals.cron");
 const price_ticker_cron_1 = require("./cron/price-ticker.cron");
-const send_telegram_processor_1 = require("./queues/send-telegram.processor");
 const config_1 = require("@nestjs/config");
-const tradingview_ingest_processor_1 = require("./queues/tradingview-ingest.processor");
+const signals_processor_1 = require("./queues/signals.processor");
 const tradingview_email_service_1 = require("./tradingview/tradingview-email.service");
 let WorkerModule = class WorkerModule {
 };
@@ -45,8 +44,7 @@ exports.WorkerModule = WorkerModule = __decorate([
         providers: [
             signals_cron_1.SignalsCron,
             price_ticker_cron_1.PriceTickerCron,
-            send_telegram_processor_1.SendTelegramProcessor,
-            tradingview_ingest_processor_1.TradingViewIngestProcessor,
+            signals_processor_1.SignalsProcessor,
             tradingview_email_service_1.TradingViewEmailIngestService,
         ],
     })

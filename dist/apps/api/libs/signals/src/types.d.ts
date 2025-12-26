@@ -1,7 +1,7 @@
 export type AssetType = 'GOLD' | 'CRYPTO';
 export type SignalKind = 'ENTRY' | 'EXIT' | 'ALERT';
 export type SignalSide = 'BUY' | 'SELL' | 'NEUTRAL';
-export type SignalSource = 'BINANCE' | 'TRADINGVIEW' | 'MANUAL';
+export type SignalSource = 'BINANCE' | 'TRADINGVIEW';
 export interface SignalLevels {
     entry?: number;
     sl?: number;

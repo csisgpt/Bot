@@ -30,24 +30,23 @@ let TradingViewEmailIngestService = TradingViewEmailIngestService_1 = class Trad
     }
     onModuleInit() {
         const enabled = this.configService.get('TRADINGVIEW_EMAIL_ENABLED', false);
-        if (!enabled) {
+        if (!enabled)
             return;
-        }
         const pollSeconds = this.configService.get('TRADINGVIEW_EMAIL_POLL_SECONDS', 30);
         const pollMs = Math.max(5, pollSeconds) * 1000;
+        this.logger.log(`TradingView email ingest enabled. Polling every ${pollMs}ms`);
         this.timer = setInterval(() => {
             void this.poll();
         }, pollMs);
     }
     onModuleDestroy() {
-        if (this.timer) {
+        if (this.timer)
             clearInterval(this.timer);
-        }
+        this.timer = undefined;
     }
     async poll() {
-        if (this.running) {
+        if (this.running)
             return;
-        }
         this.running = true;
         try {
             await this.pollOnce();
@@ -62,9 +61,8 @@ let TradingViewEmailIngestService = TradingViewEmailIngestService_1 = class Trad
     }
     async pollOnce() {
         const enabled = this.configService.get('TRADINGVIEW_EMAIL_ENABLED', false);
-        if (!enabled) {
+        if (!enabled)
             return;
-        }
         const host = this.configService.get('TRADINGVIEW_IMAP_HOST');
         const user = this.configService.get('TRADINGVIEW_IMAP_USER');
         const pass = this.configService.get('TRADINGVIEW_IMAP_PASS');
@@ -76,30 +74,35 @@ let TradingViewEmailIngestService = TradingViewEmailIngestService_1 = class Trad
             host,
             port: this.configService.get('TRADINGVIEW_IMAP_PORT', 993),
             secure: this.configService.get('TRADINGVIEW_IMAP_SECURE', true),
-            auth: {
-                user,
-                pass,
-            },
+            auth: { user, pass },
         });
-        await client.connect();
         try {
+            await client.connect();
             const mailbox = this.configService.get('TRADINGVIEW_EMAIL_FOLDER', 'INBOX');
             await client.mailboxOpen(mailbox);
             const unseen = await client.search({ seen: false });
-            if (unseen.length === 0) {
+            if (!unseen || unseen.length === 0)
                 return;
-            }
             for await (const message of client.fetch(unseen, { source: true, envelope: true })) {
-                const parsed = await (0, mailparser_1.simpleParser)(message.source);
-                const body = parsed.text ?? parsed.html ?? '';
+                if (!message.source) {
+                    this.logger.warn(`IMAP message uid=${message.uid} has no source; skipping.`);
+                    continue;
+                }
+                const parsed = (await (0, mailparser_1.simpleParser)(message.source));
+                const body = (typeof parsed.text === 'string' && parsed.text) ||
+                    (typeof parsed.html === 'string' && parsed.html) ||
+                    '';
+                const subject = parsed.subject ? String(parsed.subject) : '';
                 const payloads = this.extractPayloads(body);
+                if (payloads.length === 0) {
+                    await client.messageFlagsAdd(message.uid, ['\\Seen']);
+                    continue;
+                }
                 for (const payload of payloads) {
                     await this.signalsQueue.add('ingestTradingViewAlert', {
                         receivedAt: new Date().toISOString(),
                         ip: 'email',
-                        headersSubset: {
-                            subject: parsed.subject ?? '',
-                        },
+                        headersSubset: { subject },
                         payloadRaw: payload,
                     }, { removeOnComplete: true, removeOnFail: { count: 50 } });
                 }
@@ -107,38 +110,37 @@ let TradingViewEmailIngestService = TradingViewEmailIngestService_1 = class Trad
             }
         }
         finally {
-            await client.logout();
+            try {
+                await client.logout();
+            }
+            catch {
+            }
         }
     }
     extractPayloads(body) {
         const trimmed = body.trim();
-        if (!trimmed) {
+        if (!trimmed)
             return [];
-        }
-        const payloads = [];
         if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
             const parsed = this.safeParseJson(trimmed);
-            if (parsed) {
-                payloads.push(parsed);
-                return payloads;
-            }
+            return parsed ? [parsed] : [];
         }
+        const payloads = [];
         const regex = /---TV_JSON---([\s\S]*?)---\/TV_JSON---/g;
-        let match = regex.exec(body);
-        while (match) {
-            const candidate = match[1].trim();
+        let match;
+        while ((match = regex.exec(body)) !== null) {
+            const candidate = match[1]?.trim();
+            if (!candidate)
+                continue;
             const parsed = this.safeParseJson(candidate);
-            if (parsed) {
+            if (parsed)
                 payloads.push(parsed);
-            }
-            match = regex.exec(body);
         }
         return payloads;
     }
     safeParseJson(value) {
         try {
-            const parsed = JSON.parse(value);
-            return parsed;
+            return JSON.parse(value);
         }
         catch {
             return undefined;

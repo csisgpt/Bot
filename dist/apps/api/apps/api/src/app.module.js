@@ -12,12 +12,9 @@ const bullmq_1 = require("@nestjs/bullmq");
 const config_1 = require("@nestjs/config");
 const core_1 = require("../../../libs/core/src/index");
 const telegram_1 = require("../../../libs/telegram/src/index");
-const signals_1 = require("../../../libs/signals/src/index");
 const admin_controller_1 = require("./admin.controller");
 const health_controller_1 = require("./health.controller");
 const tradingview_controller_1 = require("./webhooks/tradingview.controller");
-const signals_controller_1 = require("./signals.controller");
-const deliveries_controller_1 = require("./deliveries.controller");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -26,7 +23,6 @@ exports.AppModule = AppModule = __decorate([
         imports: [
             core_1.CoreModule,
             telegram_1.TelegramModule,
-            signals_1.SignalsModule,
             bullmq_1.BullModule.forRootAsync({
                 imports: [core_1.CoreModule],
                 inject: [config_1.ConfigService],
@@ -36,13 +32,7 @@ exports.AppModule = AppModule = __decorate([
             }),
             bullmq_1.BullModule.registerQueue({ name: core_1.SIGNALS_QUEUE_NAME }),
         ],
-        controllers: [
-            admin_controller_1.AdminController,
-            health_controller_1.HealthController,
-            tradingview_controller_1.TradingViewWebhookController,
-            signals_controller_1.SignalsController,
-            deliveries_controller_1.DeliveriesController,
-        ],
+        controllers: [admin_controller_1.AdminController, health_controller_1.HealthController, tradingview_controller_1.TradingViewWebhookController],
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map

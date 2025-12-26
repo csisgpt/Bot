@@ -22,10 +22,9 @@ const core_1 = require("../../../../libs/core/src/index");
 const binance_1 = require("../../../../libs/binance/src/index");
 const telegram_1 = require("../../../../libs/telegram/src/index");
 let PriceTickerCron = PriceTickerCron_1 = class PriceTickerCron {
-    constructor(configService, marketPriceService, jobRunService, signalsQueue) {
+    constructor(configService, marketPriceService, signalsQueue) {
         this.configService = configService;
         this.marketPriceService = marketPriceService;
-        this.jobRunService = jobRunService;
         this.signalsQueue = signalsQueue;
         this.logger = new common_1.Logger(PriceTickerCron_1.name);
     }
@@ -51,61 +50,48 @@ let PriceTickerCron = PriceTickerCron_1 = class PriceTickerCron {
         }
     }
     async handleTick() {
-        const jobRun = await this.jobRunService.start('price_ticker');
-        const stats = { snapshots: 0 };
-        try {
-            const instruments = this.parseList(this.configService.get('PRICE_TICKER_INSTRUMENTS', 'XAUTUSDT'));
-            if (instruments.length === 0) {
-                this.logger.warn('PRICE_TICKER_INSTRUMENTS is empty.');
-                await this.jobRunService.success(jobRun.id, stats);
-                return;
-            }
-            const snapshots = [];
-            for (const instrument of instruments) {
-                const snapshot = await this.marketPriceService.getLastPrice(instrument);
-                if (snapshot) {
-                    snapshots.push(snapshot);
-                }
-                else {
-                    this.logger.warn(`No price available for ${instrument}.`);
-                }
-            }
-            if (snapshots.length === 0) {
-                await this.jobRunService.success(jobRun.id, stats);
-                return;
-            }
-            stats.snapshots = snapshots.length;
-            const entries = snapshots.map((snapshot) => ({
-                symbol: snapshot.symbol,
-                price: snapshot.price,
-            }));
-            const message = (0, telegram_1.formatPriceTickerMessage)(entries, Date.now());
-            const postToGroup = this.configService.get('PRICE_TICKER_POST_TO_GROUP', true);
-            const postToChannel = this.configService.get('PRICE_TICKER_POST_TO_CHANNEL', true);
-            if (postToGroup) {
-                const groupId = this.configService.get('TELEGRAM_SIGNAL_GROUP_ID', '');
-                if (groupId) {
-                    await (0, telegram_1.enqueueTextMessage)(this.signalsQueue, groupId, message);
-                }
-                else {
-                    this.logger.warn('PRICE_TICKER_POST_TO_GROUP enabled but TELEGRAM_SIGNAL_GROUP_ID missing.');
-                }
-            }
-            if (postToChannel) {
-                const channelId = this.configService.get('TELEGRAM_SIGNAL_CHANNEL_ID', '');
-                if (channelId) {
-                    await (0, telegram_1.enqueueTextMessage)(this.signalsQueue, channelId, message);
-                }
-                else {
-                    this.logger.warn('PRICE_TICKER_POST_TO_CHANNEL enabled but TELEGRAM_SIGNAL_CHANNEL_ID missing.');
-                }
-            }
-            await this.jobRunService.success(jobRun.id, stats);
+        const instruments = this.parseList(this.configService.get('PRICE_TICKER_INSTRUMENTS', 'XAUTUSDT'));
+        if (instruments.length === 0) {
+            this.logger.warn('PRICE_TICKER_INSTRUMENTS is empty.');
+            return;
         }
-        catch (error) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            await this.jobRunService.fail(jobRun.id, message, stats);
-            throw error;
+        const snapshots = [];
+        for (const instrument of instruments) {
+            const snapshot = await this.marketPriceService.getLastPrice(instrument);
+            if (snapshot) {
+                snapshots.push(snapshot);
+            }
+            else {
+                this.logger.warn(`No price available for ${instrument}.`);
+            }
+        }
+        if (snapshots.length === 0) {
+            return;
+        }
+        const entries = snapshots.map((snapshot) => ({
+            symbol: snapshot.symbol,
+            price: snapshot.price,
+        }));
+        const message = (0, telegram_1.formatPriceTickerMessage)(entries, Date.now());
+        const postToGroup = this.configService.get('PRICE_TICKER_POST_TO_GROUP', true);
+        const postToChannel = this.configService.get('PRICE_TICKER_POST_TO_CHANNEL', true);
+        if (postToGroup) {
+            const groupId = this.configService.get('TELEGRAM_SIGNAL_GROUP_ID', '');
+            if (groupId) {
+                await (0, telegram_1.enqueueTextMessage)(this.signalsQueue, groupId, message);
+            }
+            else {
+                this.logger.warn('PRICE_TICKER_POST_TO_GROUP enabled but TELEGRAM_SIGNAL_GROUP_ID missing.');
+            }
+        }
+        if (postToChannel) {
+            const channelId = this.configService.get('TELEGRAM_SIGNAL_CHANNEL_ID', '');
+            if (channelId) {
+                await (0, telegram_1.enqueueTextMessage)(this.signalsQueue, channelId, message);
+            }
+            else {
+                this.logger.warn('PRICE_TICKER_POST_TO_CHANNEL enabled but TELEGRAM_SIGNAL_CHANNEL_ID missing.');
+            }
         }
     }
     parseList(value) {
@@ -118,10 +104,9 @@ let PriceTickerCron = PriceTickerCron_1 = class PriceTickerCron {
 exports.PriceTickerCron = PriceTickerCron;
 exports.PriceTickerCron = PriceTickerCron = PriceTickerCron_1 = __decorate([
     (0, common_1.Injectable)(),
-    __param(3, (0, bullmq_1.InjectQueue)(core_1.SIGNALS_QUEUE_NAME)),
+    __param(2, (0, bullmq_1.InjectQueue)(core_1.SIGNALS_QUEUE_NAME)),
     __metadata("design:paramtypes", [config_1.ConfigService,
         binance_1.MarketPriceService,
-        core_1.JobRunService,
         bullmq_2.Queue])
 ], PriceTickerCron);
 //# sourceMappingURL=price-ticker.cron.js.map

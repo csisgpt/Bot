@@ -16,12 +16,10 @@ exports.AdminController = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const telegram_1 = require("../../../libs/telegram/src/index");
-const signals_1 = require("../../../libs/signals/src/index");
 let AdminController = class AdminController {
-    constructor(configService, telegramService, seedService) {
+    constructor(configService, telegramService) {
         this.configService = configService;
         this.telegramService = telegramService;
-        this.seedService = seedService;
     }
     async testTelegram(ownerUserIdHeader, adminTokenHeader) {
         const ownerUserId = this.configService.get('TELEGRAM_OWNER_USER_ID') ??
@@ -32,13 +30,9 @@ let AdminController = class AdminController {
         if (!ownerMatch && !tokenMatch) {
             throw new common_1.HttpException('Unauthorized', common_1.HttpStatus.UNAUTHORIZED);
         }
-        const message = `✅ Telegram test from API (${new Date().toISOString()})`;
+        const message = `✅ Telegram test from API (${new Date().toISOString()}) I Love U`;
         await this.telegramService.sendTestMessage(message);
         return { ok: true };
-    }
-    async seed() {
-        const details = await this.seedService.seed();
-        return { ok: true, details };
     }
 };
 exports.AdminController = AdminController;
@@ -50,16 +44,9 @@ __decorate([
     __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], AdminController.prototype, "testTelegram", null);
-__decorate([
-    (0, common_1.Post)('seed'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", Promise)
-], AdminController.prototype, "seed", null);
 exports.AdminController = AdminController = __decorate([
     (0, common_1.Controller)('admin'),
     __metadata("design:paramtypes", [config_1.ConfigService,
-        telegram_1.TelegramService,
-        signals_1.SeedService])
+        telegram_1.TelegramService])
 ], AdminController);
 //# sourceMappingURL=admin.controller.js.map

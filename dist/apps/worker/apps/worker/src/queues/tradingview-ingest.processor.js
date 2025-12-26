@@ -21,14 +21,12 @@ const bullmq_2 = require("bullmq");
 const core_1 = require("../../../../libs/core/src/index");
 const signals_1 = require("../../../../libs/signals/src/index");
 let TradingViewIngestProcessor = TradingViewIngestProcessor_1 = class TradingViewIngestProcessor extends bullmq_1.WorkerHost {
-    constructor(configService, signalsService, signalDedupeService, feedRegistry, routingService, signalDeliveryService, signalsQueue) {
+    constructor(configService, signalsService, signalDedupeService, feedRegistry, signalsQueue) {
         super();
         this.configService = configService;
         this.signalsService = signalsService;
         this.signalDedupeService = signalDedupeService;
         this.feedRegistry = feedRegistry;
-        this.routingService = routingService;
-        this.signalDeliveryService = signalDeliveryService;
         this.signalsQueue = signalsQueue;
         this.logger = new common_1.Logger(TradingViewIngestProcessor_1.name);
     }
@@ -36,43 +34,39 @@ let TradingViewIngestProcessor = TradingViewIngestProcessor_1 = class TradingVie
         if (job.name !== 'ingestTradingViewAlert') {
             return;
         }
+        const startedAt = Date.now();
+        const { payloadRaw } = job.data;
+        const { payload, parseError } = (0, signals_1.parseTradingViewPayload)(payloadRaw);
+        const instrument = (payload.instrument ?? payload.symbol ?? 'unknown');
+        const interval = (payload.interval ?? payload.timeframe ?? 'unknown');
+        const strategy = (payload.strategy ?? 'unknown');
         try {
-            const { payloadRaw } = job.data;
-            const { payload, parseError } = (0, signals_1.parseTradingViewPayload)(payloadRaw);
-            if (parseError) {
-                this.logger.warn(`TradingView payload parse error for job ${job.id ?? 'unknown'}: ${parseError}`);
-            }
             const defaults = this.getDefaults();
-            const priceFallback = await this.resolvePriceFallback(payload, defaults);
-            const signal = (0, signals_1.mapTradingViewPayloadToSignal)(payloadRaw, defaults, priceFallback);
+            const signal = (0, signals_1.mapTradingViewPayloadToSignal)(payloadRaw, defaults, undefined);
+            const attempts = this.getNumber('SIGNALS_TELEGRAM_JOB_ATTEMPTS', 5);
+            const backoffDelayMs = this.getNumber('SIGNALS_TELEGRAM_JOB_BACKOFF_DELAY_MS', 2000);
+            const priority = this.getNumber('SIGNALS_TELEGRAM_JOB_PRIORITY', 1);
+            await this.signalsQueue.add('sendTelegramSignal', signal, {
+                priority,
+                attempts,
+                backoff: { type: 'exponential', delay: backoffDelayMs },
+                removeOnComplete: true,
+                removeOnFail: { count: 200 },
+            });
             if (signal.price === null) {
-                this.logger.warn(`TradingView price unavailable for job ${job.id ?? 'unknown'} (${signal.instrument} ${signal.interval})`);
+                const priceFallbackTimeoutMs = this.getNumber('TRADINGVIEW_PRICE_FALLBACK_TIMEOUT_MS', 800);
+                void this.withTimeout(this.resolvePriceFallback(payload, defaults), priceFallbackTimeoutMs, undefined)
+                    .then((priceFallback) => {
+                    if (priceFallback !== undefined) {
+                        this.logger.log(`Resolved fallback price: ${priceFallback} for ${signal.instrument}`);
+                    }
+                })
+                    .catch((e) => this.logger.warn(`Fallback price resolve failed: ${e?.message ?? e}`));
             }
-            const shouldProcess = await this.signalDedupeService.isAllowed(signal);
-            if (!shouldProcess) {
-                return;
-            }
-            const storedSignal = await this.signalsService.storeSignal(signal);
-            if (!storedSignal) {
-                return;
-            }
-            const destinations = await this.routingService.resolveDestinations(signal);
-            const deliveries = await this.signalDeliveryService.createPendingDeliveries(storedSignal.id, destinations);
-            for (const delivery of deliveries) {
-                await this.signalsQueue.add('sendTelegramDelivery', { deliveryId: delivery.id }, {
-                    attempts: 3,
-                    removeOnComplete: true,
-                    removeOnFail: { count: 50 },
-                });
-            }
+            void this.signalsService.storeSignal(signal).catch((e) => this.logger.warn(`storeSignal failed: ${e?.message ?? e}`));
         }
         catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
-            const { payloadRaw } = job.data;
-            const { payload } = (0, signals_1.parseTradingViewPayload)(payloadRaw);
-            const instrument = (payload.instrument ?? payload.symbol ?? 'unknown');
-            const interval = (payload.interval ?? payload.timeframe ?? 'unknown');
-            const strategy = (payload.strategy ?? 'unknown');
             this.logger.error(`TradingView ingest failed for job ${job.id ?? 'unknown'} (${instrument} ${interval} ${strategy}): ${message}`);
             throw error;
         }
@@ -107,18 +101,36 @@ let TradingViewIngestProcessor = TradingViewIngestProcessor_1 = class TradingVie
         }
         return undefined;
     }
+    getNumber(key, fallback) {
+        const raw = this.configService.get(key);
+        if (raw === undefined || raw === null || raw === '')
+            return fallback;
+        const n = typeof raw === 'number' ? raw : Number(raw);
+        return Number.isFinite(n) ? n : fallback;
+    }
+    async withTimeout(promise, timeoutMs, fallback) {
+        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+            return promise;
+        return Promise.race([
+            promise,
+            new Promise((resolve) => {
+                const t = setTimeout(() => {
+                    clearTimeout(t);
+                    resolve(fallback);
+                }, timeoutMs);
+            }),
+        ]);
+    }
 };
 exports.TradingViewIngestProcessor = TradingViewIngestProcessor;
 exports.TradingViewIngestProcessor = TradingViewIngestProcessor = TradingViewIngestProcessor_1 = __decorate([
     (0, common_1.Injectable)(),
     (0, bullmq_1.Processor)(core_1.SIGNALS_QUEUE_NAME, { concurrency: core_1.SIGNALS_QUEUE_CONCURRENCY }),
-    __param(6, (0, bullmq_1.InjectQueue)(core_1.SIGNALS_QUEUE_NAME)),
+    __param(4, (0, bullmq_1.InjectQueue)(core_1.SIGNALS_QUEUE_NAME)),
     __metadata("design:paramtypes", [config_1.ConfigService,
         signals_1.SignalsService,
         signals_1.SignalDedupeService,
         signals_1.FeedRegistry,
-        signals_1.RoutingService,
-        signals_1.SignalDeliveryService,
         bullmq_2.Queue])
 ], TradingViewIngestProcessor);
 //# sourceMappingURL=tradingview-ingest.processor.js.map

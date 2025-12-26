@@ -13,7 +13,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BinanceWsService = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
-const ws_1 = require("ws");
+const WebSocket = require("ws");
 const core_1 = require("../../core/src/index");
 const market_price_service_1 = require("./market-price.service");
 let BinanceWsService = BinanceWsService_1 = class BinanceWsService {
@@ -41,7 +41,7 @@ let BinanceWsService = BinanceWsService_1 = class BinanceWsService {
         if (this.heartbeatInterval) {
             clearInterval(this.heartbeatInterval);
         }
-        if (this.ws && this.ws.readyState === ws_1.default.OPEN) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.close();
         }
     }
@@ -54,7 +54,7 @@ let BinanceWsService = BinanceWsService_1 = class BinanceWsService {
         const baseUrl = this.configService.get('BINANCE_WS_BASE_URL', 'wss://stream.binance.com:9443');
         const url = `${baseUrl}/stream?streams=${streams.join('/')}`;
         this.logger.log(`Connecting to Binance WS (${streams.length} streams)`);
-        this.ws = new ws_1.default(url);
+        this.ws = new WebSocket(url);
         this.ws.on('open', () => {
             this.logger.log('Binance WS connected');
             this.startHeartbeat();
@@ -114,7 +114,7 @@ let BinanceWsService = BinanceWsService_1 = class BinanceWsService {
             clearInterval(this.heartbeatInterval);
         }
         this.heartbeatInterval = setInterval(() => {
-            if (!this.ws || this.ws.readyState !== ws_1.default.OPEN) {
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
                 return;
             }
             this.ws.ping();

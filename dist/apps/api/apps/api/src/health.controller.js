@@ -11,16 +11,8 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.HealthController = void 0;
 const common_1 = require("@nestjs/common");
-const core_1 = require("../../../libs/core/src/index");
 let HealthController = class HealthController {
-    constructor(prismaService) {
-        this.prismaService = prismaService;
-    }
     health() {
-        return { status: 'ok' };
-    }
-    async dbHealth() {
-        await this.prismaService.signal.count({ take: 1 });
         return { status: 'ok' };
     }
 };
@@ -31,14 +23,7 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Object)
 ], HealthController.prototype, "health", null);
-__decorate([
-    (0, common_1.Get)('db'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", Promise)
-], HealthController.prototype, "dbHealth", null);
 exports.HealthController = HealthController = __decorate([
-    (0, common_1.Controller)('health'),
-    __metadata("design:paramtypes", [core_1.PrismaService])
+    (0, common_1.Controller)('health')
 ], HealthController);
 //# sourceMappingURL=health.controller.js.map

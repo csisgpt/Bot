@@ -13,17 +13,14 @@ exports.SendTelegramProcessor = void 0;
 const bullmq_1 = require("@nestjs/bullmq");
 const telegram_1 = require("../../../../libs/telegram/src/index");
 const core_1 = require("../../../../libs/core/src/index");
-const core_2 = require("../../../../libs/core/src/index");
 let SendTelegramProcessor = class SendTelegramProcessor extends bullmq_1.WorkerHost {
-    constructor(telegramService, prismaService) {
+    constructor(telegramService) {
         super();
         this.telegramService = telegramService;
-        this.prismaService = prismaService;
     }
     async process(job) {
-        if (job.name === 'sendTelegramDelivery') {
-            const payload = job.data;
-            await this.handleDelivery(payload);
+        if (job.name === 'sendTelegramSignal') {
+            await this.telegramService.sendSignal(job.data);
             return;
         }
         if (job.name === 'sendTelegramText') {
@@ -31,52 +28,10 @@ let SendTelegramProcessor = class SendTelegramProcessor extends bullmq_1.WorkerH
             await this.telegramService.sendMessage(String(payload.chatId), payload.text, payload.parseMode);
         }
     }
-    async handleDelivery(payload) {
-        const delivery = await this.prismaService.signalDelivery.findUnique({
-            where: { id: payload.deliveryId },
-            include: { signal: true, destination: true },
-        });
-        if (!delivery) {
-            return;
-        }
-        const updated = await this.prismaService.signalDelivery.update({
-            where: { id: payload.deliveryId },
-            data: { attempt: { increment: 1 } },
-            include: { signal: true, destination: true },
-        });
-        if (updated.status === 'SENT') {
-            return;
-        }
-        const message = (0, telegram_1.formatSignalMessage)(updated.signal);
-        const messageStyle = (updated.destination.messageStyle ?? {});
-        try {
-            const messageId = await this.telegramService.sendMessage(updated.destination.chatId, message, messageStyle.parseMode);
-            await this.prismaService.signalDelivery.update({
-                where: { id: payload.deliveryId },
-                data: {
-                    status: 'SENT',
-                    telegramMessageId: messageId ? String(messageId) : undefined,
-                    error: null,
-                },
-            });
-        }
-        catch (error) {
-            const messageError = error instanceof Error ? error.message : 'Unknown error';
-            await this.prismaService.signalDelivery.update({
-                where: { id: payload.deliveryId },
-                data: {
-                    status: 'FAILED',
-                    error: messageError,
-                },
-            });
-            throw error;
-        }
-    }
 };
 exports.SendTelegramProcessor = SendTelegramProcessor;
 exports.SendTelegramProcessor = SendTelegramProcessor = __decorate([
-    (0, bullmq_1.Processor)(core_2.SIGNALS_QUEUE_NAME, { concurrency: core_2.SIGNALS_QUEUE_CONCURRENCY }),
-    __metadata("design:paramtypes", [telegram_1.TelegramService,
-        core_1.PrismaService])
+    (0, bullmq_1.Processor)(core_1.SIGNALS_QUEUE_NAME, { concurrency: core_1.SIGNALS_QUEUE_CONCURRENCY }),
+    __metadata("design:paramtypes", [telegram_1.TelegramService])
 ], SendTelegramProcessor);
 //# sourceMappingURL=send-telegram.processor.js.map

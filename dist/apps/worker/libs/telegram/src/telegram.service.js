@@ -19,12 +19,15 @@ let TelegramService = TelegramService_1 = class TelegramService {
     constructor(configService) {
         this.logger = new common_1.Logger(TelegramService_1.name);
         const token = configService.get('TELEGRAM_BOT_TOKEN');
-        if (!token) {
+        if (!token)
             throw new Error('TELEGRAM_BOT_TOKEN is required');
-        }
         this.channelId = configService.get('TELEGRAM_SIGNAL_CHANNEL_ID', '');
         this.groupId = configService.get('TELEGRAM_SIGNAL_GROUP_ID', '');
-        this.parseMode = configService.get('TELEGRAM_PARSE_MODE', 'HTML');
+        const pm = (configService.get('TELEGRAM_PARSE_MODE', 'HTML') || 'HTML').toUpperCase();
+        this.parseMode =
+            pm === 'MARKDOWN' || pm === 'MARKDOWNV2' || pm === 'HTML'
+                ? pm
+                : 'HTML';
         this.disableWebPreview = configService.get('TELEGRAM_DISABLE_WEB_PAGE_PREVIEW', true);
         this.bot = new telegraf_1.Telegraf(token);
     }
@@ -36,23 +39,22 @@ let TelegramService = TelegramService_1 = class TelegramService {
         await this.sendMessageToDestinations(message);
     }
     async sendMessage(chatId, message, parseMode) {
-        const response = await this.bot.telegram.sendMessage(chatId, message, {
+        await this.bot.telegram.sendMessage(chatId, message, {
             parse_mode: parseMode ?? this.parseMode,
-            disable_web_page_preview: this.disableWebPreview,
+            link_preview_options: { is_disabled: this.disableWebPreview }
         });
-        return response?.message_id;
     }
     async sendMessageToDestinations(message) {
         if (this.channelId) {
             await this.bot.telegram.sendMessage(this.channelId, message, {
                 parse_mode: this.parseMode,
-                disable_web_page_preview: this.disableWebPreview,
+                link_preview_options: { is_disabled: this.disableWebPreview }
             });
         }
         if (this.groupId) {
             await this.bot.telegram.sendMessage(this.groupId, message, {
                 parse_mode: this.parseMode,
-                disable_web_page_preview: this.disableWebPreview,
+                link_preview_options: { is_disabled: this.disableWebPreview }
             });
         }
         if (!this.channelId && !this.groupId) {

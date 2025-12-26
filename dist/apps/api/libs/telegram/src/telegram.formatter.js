@@ -1,10 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.formatPriceTickerMessage = exports.formatSignalMessage = void 0;
-const client_1 = require("@prisma/client");
 const formatNumber = (value) => value.toFixed(4);
-const toNumber = (value) => value instanceof client_1.Prisma.Decimal ? value.toNumber() : value;
-const formatPrice = (value) => value === null || value === undefined ? 'N/A' : formatNumber(toNumber(value));
+const formatPrice = (value) => value === null || value === undefined ? 'N/A' : formatNumber(value);
 const formatLevels = (levels) => {
     if (!levels) {
         return [];
@@ -24,9 +22,8 @@ const formatLevels = (levels) => {
     }
     return rows;
 };
-const toDate = (value) => (value instanceof Date ? value : new Date(value));
 const formatSignalMessage = (signal) => {
-    const header = signal.side === 'BUY' ? '🟢 BUY' : signal.side === 'SELL' ? '🔴 SELL' : '⚪️ NEUTRAL';
+    const header = signal.side === 'BUY' ? '🟢 1خ' : signal.side === 'SELL' ? '🔴 1ف' : '⚪️ NEUTRAL';
     const lines = [
         `<b>${header}</b>`,
         `<b>Asset:</b> ${signal.assetType}`,
@@ -43,7 +40,7 @@ const formatSignalMessage = (signal) => {
         lines.push('<b>Levels</b>');
         lines.push(...levels);
     }
-    lines.push(`<b>Time:</b> ${toDate(signal.time).toISOString()}`);
+    lines.push(`<b>Time:</b> ${new Date(signal.time).toISOString()}`);
     return lines.join('\n');
 };
 exports.formatSignalMessage = formatSignalMessage;

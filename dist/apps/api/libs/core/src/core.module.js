@@ -12,7 +12,6 @@ const config_1 = require("@nestjs/config");
 const prisma_service_1 = require("./prisma.service");
 const redis_service_1 = require("./redis.service");
 const env_schema_1 = require("./env.schema");
-const job_run_service_1 = require("./job-run.service");
 let CoreModule = class CoreModule {
 };
 exports.CoreModule = CoreModule;
@@ -24,8 +23,8 @@ exports.CoreModule = CoreModule = __decorate([
                 validate: (config) => env_schema_1.envSchema.parse(config),
             }),
         ],
-        providers: [prisma_service_1.PrismaService, redis_service_1.RedisService, job_run_service_1.JobRunService],
-        exports: [config_1.ConfigModule, prisma_service_1.PrismaService, redis_service_1.RedisService, job_run_service_1.JobRunService],
+        providers: [prisma_service_1.PrismaService, redis_service_1.RedisService],
+        exports: [config_1.ConfigModule, prisma_service_1.PrismaService, redis_service_1.RedisService],
     })
 ], CoreModule);
 //# sourceMappingURL=core.module.js.map
