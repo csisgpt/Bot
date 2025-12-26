@@ -8,7 +8,7 @@ This repo is a NestJS monorepo with `apps/api` and `apps/worker`. Render Free do
 
 **Build command:**
 ```
-pnpm install --frozen-lockfile && pnpm build:worker
+pnpm install --no-frozen-lockfile && pnpm build:worker
 ```
 
 **Start command:**
@@ -26,9 +26,10 @@ pnpm start:worker:prod
 Set the same values you use locally. Common ones for the worker include:
 
 - `NODE_ENV=production`
-- `REDIS_URL=...`
-- `DATABASE_URL=...` (if the worker reads from the database)
+- `REDIS_URL=...` (shared with API)
 - `TELEGRAM_BOT_TOKEN=...` (if the worker sends Telegram messages)
+- `BINANCE_API_KEY=...` / `BINANCE_SECRET_KEY=...` (if Binance integration is enabled)
+- `DATABASE_URL=...` (only if the worker reads from the database)
 
 > Render automatically injects `PORT`; the worker will use it first and bind to `0.0.0.0`.
 
@@ -75,6 +76,18 @@ Prisma client generation is required for builds. `pnpm build:worker` runs `pnpm 
    ```
    curl -s http://localhost:3001/health
    ```
+
+### Docker (worker only)
+
+```
+docker run -e RUN_API=false -e RUN_WORKER=true -e PORT=3001 -p 3001:3001 <image>
+```
+
+### Docker (api only)
+
+```
+docker run -e RUN_API=true -e RUN_WORKER=false -e PORT=3000 -p 3000:3000 <image>
+```
 
 ### Render
 

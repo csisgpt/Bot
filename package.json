@@ -12,6 +12,7 @@
     "build:api": "nest build api",
     "build:worker": "pnpm prisma:generate && nest build worker",
     "start:api": "node dist/apps/api/main.js",
+    "start:api:prod": "node dist/apps/api/main.js",
     "start:worker": "node dist/apps/worker/main.js",
     "start:worker:prod": "node dist/apps/worker/main.js",
     "prisma": "prisma",
