@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -eu
 
 RUN_API="${RUN_API:-true}"
 RUN_WORKER="${RUN_WORKER:-true}"
@@ -10,66 +10,43 @@ is_true() {
 }
 
 if ! is_true "$RUN_API" && ! is_true "$RUN_WORKER"; then
-  echo "ERROR: RUN_API and RUN_WORKER are both false; nothing to run."
+  echo "ERROR: RUN_API and RUN_WORKER are both false; nothing to run." >&2
   exit 1
-fi
-
-API_MAIN=""
-WORKER_MAIN=""
-
-if is_true "$RUN_API"; then
-  API_MAIN="$(find dist/apps/api -type f -name main.js | head -n 1)"
-  if [ -z "$API_MAIN" ]; then
-    echo "ERROR: Could not find compiled API main.js."
-    find dist/apps -maxdepth 5 -type f -name "*.js" | head -n 200
-    exit 1
-  fi
-fi
-
-if is_true "$RUN_WORKER"; then
-  WORKER_MAIN="$(find dist/apps/worker -type f -name main.js | head -n 1)"
-  if [ -z "$WORKER_MAIN" ]; then
-    echo "ERROR: Could not find compiled worker main.js."
-    find dist/apps -maxdepth 5 -type f -name "*.js" | head -n 200
-    exit 1
-  fi
 fi
 
 if is_true "$RUN_API" && is_true "$MIGRATE_ON_START"; then
   echo "Running prisma migrations..."
-  ./node_modules/.bin/prisma migrate deploy
+  ./scripts/migrate-deploy.sh
 fi
 
 PIDS=""
 
 terminate() {
   for pid in $PIDS; do
-    kill "$pid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
   done
 }
 
-trap "terminate" INT TERM
+trap 'terminate' INT TERM
 
 if is_true "$RUN_WORKER"; then
-  echo "Starting worker: $WORKER_MAIN"
-  node "$WORKER_MAIN" &
+  echo "Starting worker: dist/apps/worker/main.js"
+  node dist/apps/worker/main.js &
   PIDS="$PIDS $!"
 fi
 
 if is_true "$RUN_API"; then
-  echo "Starting api: $API_MAIN"
-  node "$API_MAIN" &
+  echo "Starting api: dist/apps/api/main.js"
+  node dist/apps/api/main.js &
   PIDS="$PIDS $!"
 fi
 
 EXIT_CODE=0
-while :; do
-  for pid in $PIDS; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      wait "$pid" || EXIT_CODE=$?
-      terminate
-      exit "$EXIT_CODE"
-    fi
-  done
-  sleep 2
+for pid in $PIDS; do
+  if ! wait "$pid"; then
+    EXIT_CODE=$?
+    terminate
+  fi
 done
+
+exit "$EXIT_CODE"

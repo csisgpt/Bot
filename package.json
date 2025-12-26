@@ -19,6 +19,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:status": "prisma migrate status",
     "test": "vitest run",
     "smoke:test": "ts-node scripts/smoke-test.ts"
   },
