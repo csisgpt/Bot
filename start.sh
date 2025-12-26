@@ -14,11 +14,6 @@ if ! is_true "$RUN_API" && ! is_true "$RUN_WORKER"; then
   exit 1
 fi
 
-if is_true "$RUN_API" && is_true "$MIGRATE_ON_START"; then
-  echo "Running prisma migrations..."
-  ./scripts/migrate-deploy.sh
-fi
-
 PIDS=""
 
 terminate() {
@@ -28,6 +23,11 @@ terminate() {
 }
 
 trap 'terminate' INT TERM
+
+if is_true "$RUN_API" && is_true "$MIGRATE_ON_START"; then
+  echo "Running prisma migrations..."
+  ./scripts/migrate-deploy.sh
+fi
 
 if is_true "$RUN_WORKER"; then
   echo "Starting worker: dist/apps/worker/main.js"
@@ -43,9 +43,12 @@ fi
 
 EXIT_CODE=0
 for pid in $PIDS; do
-  if ! wait "$pid"; then
-    EXIT_CODE=$?
+  wait "$pid"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    EXIT_CODE="$rc"
     terminate
+    break
   fi
 done
 

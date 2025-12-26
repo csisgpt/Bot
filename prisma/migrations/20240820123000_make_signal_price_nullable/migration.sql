@@ -1,2 +1,0 @@
-ALTER TABLE "Signal"
-ALTER COLUMN "price" DROP NOT NULL;
