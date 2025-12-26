@@ -36,7 +36,8 @@ COPY --from=build /app/prisma ./prisma
 COPY package.json ./
 
 COPY start.sh ./start.sh
-RUN chmod +x ./start.sh
+COPY scripts ./scripts
+RUN chmod +x ./start.sh ./scripts/*.sh
 
 EXPOSE 3000
 CMD ["./start.sh"]
