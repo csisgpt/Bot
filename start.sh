@@ -1,34 +1,52 @@
 #!/bin/sh
-set -e
+set -eu
 
-echo "Syncing schema with prisma db push..."
-./node_modules/.bin/prisma db push --accept-data-loss --skip-generate
+RUN_API="${RUN_API:-true}"
+RUN_WORKER="${RUN_WORKER:-true}"
+MIGRATE_ON_START="${MIGRATE_ON_START:-true}"
 
-API_MAIN="$(find dist/apps/api -type f -name main.js | head -n 1)"
-WORKER_MAIN="$(find dist/apps/worker -type f -name main.js | head -n 1)"
+is_true() {
+  [ "$1" = "true" ] || [ "$1" = "TRUE" ] || [ "$1" = "1" ]
+}
 
-if [ -z "$API_MAIN" ] || [ -z "$WORKER_MAIN" ]; then
-  echo "ERROR: Could not find compiled main.js files."
-  echo "API_MAIN=$API_MAIN"
-  echo "WORKER_MAIN=$WORKER_MAIN"
-  echo "Dump dist/apps:"
-  find dist/apps -maxdepth 5 -type f -name "*.js" | head -n 200
+if ! is_true "$RUN_API" && ! is_true "$RUN_WORKER"; then
+  echo "ERROR: RUN_API and RUN_WORKER are both false; nothing to run." >&2
   exit 1
 fi
 
-echo "Starting worker: $WORKER_MAIN"
-node "$WORKER_MAIN" &
-WORKER_PID=$!
+if is_true "$RUN_API" && is_true "$MIGRATE_ON_START"; then
+  echo "Running prisma migrations..."
+  ./scripts/migrate-deploy.sh
+fi
 
-echo "Starting api: $API_MAIN"
-node "$API_MAIN" &
-API_PID=$!
+PIDS=""
 
-trap "kill $WORKER_PID $API_PID 2>/dev/null || true" INT TERM
+terminate() {
+  for pid in $PIDS; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+}
 
-while kill -0 $WORKER_PID 2>/dev/null && kill -0 $API_PID 2>/dev/null; do
-  sleep 2
+trap 'terminate' INT TERM
+
+if is_true "$RUN_WORKER"; then
+  echo "Starting worker: dist/apps/worker/main.js"
+  node dist/apps/worker/main.js &
+  PIDS="$PIDS $!"
+fi
+
+if is_true "$RUN_API"; then
+  echo "Starting api: dist/apps/api/main.js"
+  node dist/apps/api/main.js &
+  PIDS="$PIDS $!"
+fi
+
+EXIT_CODE=0
+for pid in $PIDS; do
+  if ! wait "$pid"; then
+    EXIT_CODE=$?
+    terminate
+  fi
 done
 
-kill $WORKER_PID $API_PID 2>/dev/null || true
-exit 1
+exit "$EXIT_CODE"

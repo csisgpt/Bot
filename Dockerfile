@@ -34,9 +34,9 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 COPY package.json ./
+COPY scripts ./scripts
 
 COPY start.sh ./start.sh
-COPY scripts ./scripts
 RUN chmod +x ./start.sh ./scripts/*.sh
 
 EXPOSE 3000
