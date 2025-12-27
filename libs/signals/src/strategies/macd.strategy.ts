@@ -45,8 +45,8 @@ export const createMacdStrategy = (config: MacdConfig): Strategy => ({
         time: latest.closeTime,
         confidence: 74,
         tags: ['macd', 'momentum'],
-        reason: `MACD crossed above signal (${currMacd.toFixed(4)} > ${currSignal.toFixed(4)}).`,
-        why: 'MACD line crossed above the signal line, showing bullish momentum.',
+        reason: `MACD بالای سیگنال کراس کرد (${currMacd.toFixed(4)} > ${currSignal.toFixed(4)}).`,
+        why: 'خط MACD بالای خط سیگنال قرار گرفت و مومنتوم صعودی را نشان می\u000cدهد.',
         indicators: {
           macd: currMacd,
           signal: currSignal,
@@ -67,8 +67,8 @@ export const createMacdStrategy = (config: MacdConfig): Strategy => ({
         time: latest.closeTime,
         confidence: 74,
         tags: ['macd', 'momentum'],
-        reason: `MACD crossed below signal (${currMacd.toFixed(4)} < ${currSignal.toFixed(4)}).`,
-        why: 'MACD line crossed below the signal line, showing bearish momentum.',
+        reason: `MACD پایین\u000cتر از سیگنال کراس کرد (${currMacd.toFixed(4)} < ${currSignal.toFixed(4)}).`,
+        why: 'خط MACD زیر خط سیگنال قرار گرفت و مومنتوم نزولی را نشان می\u000cدهد.',
         indicators: {
           macd: currMacd,
           signal: currSignal,

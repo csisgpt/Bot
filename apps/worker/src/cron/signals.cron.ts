@@ -294,6 +294,21 @@ export class SignalsCron {
   }
 
   private isSignalAllowedForChat(signal: Signal, chatConfig: ChatConfig, now: Date): boolean {
+    const assetsEnabled = (chatConfig.assetsEnabled ?? []).map((asset) => asset.toUpperCase());
+    if (assetsEnabled.length > 0 && !assetsEnabled.includes(signal.assetType.toUpperCase())) {
+      return false;
+    }
+
+    const timeframes = (chatConfig.timeframes ?? []).map((frame) => frame.toLowerCase());
+    if (timeframes.length > 0 && !timeframes.includes(signal.interval.toLowerCase())) {
+      return false;
+    }
+
+    const watchlist = (chatConfig.watchlist ?? []).map((item) => item.toUpperCase());
+    if (watchlist.length > 0 && !watchlist.includes(signal.instrument.toUpperCase())) {
+      return false;
+    }
+
     if (signal.confidence < chatConfig.minConfidence) return false;
 
     // mute logic

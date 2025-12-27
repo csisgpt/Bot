@@ -51,7 +51,7 @@ export class DigestCron {
     });
 
     if (signals.length === 0) {
-      return '🧾 <b>Daily digest</b>\nNo signals today.';
+      return '🧾 <b>گزارش روزانه</b>\nامروز سیگنالی ثبت نشد.';
     }
 
     let buyCount = 0;
@@ -75,10 +75,10 @@ export class DigestCron {
     const avgConfidence = totalConfidence / signals.length;
 
     return [
-      '🧾 <b>Daily digest</b>',
-      `Signals: ${signals.length} (BUY ${buyCount} / SELL ${sellCount})`,
-      `Top instruments: ${topInstruments || 'n/a'}`,
-      `Avg confidence: ${avgConfidence.toFixed(1)}%`,
+      '🧾 <b>گزارش روزانه</b>',
+      `سیگنال\u000cها: ${signals.length} (خرید ${buyCount} / فروش ${sellCount})`,
+      `نمادهای برتر: ${this.escapeHtml(topInstruments || 'نامشخص')}`,
+      `میانگین اعتماد: ${avgConfidence.toFixed(1)}%`,
     ].join('\n');
   }
 
@@ -147,5 +147,14 @@ export class DigestCron {
       return !(minutes >= startMinutes && minutes < endMinutes);
     }
     return !(minutes >= startMinutes || minutes < endMinutes);
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

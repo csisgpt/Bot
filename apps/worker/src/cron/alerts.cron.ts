@@ -64,11 +64,11 @@ export class AlertsCron {
   ): string {
     const thresholdLabel =
       type === 'UP_PCT'
-        ? `+${threshold ?? 0}%`
+        ? `٪${threshold ?? 0}+`
         : type === 'DOWN_PCT'
-          ? `-${threshold ?? 0}%`
-          : 'TP1';
-    return `🔔 <b>Alert hit</b>\n<b>${instrument}</b> ${thresholdLabel}\nPrice: ${price.toFixed(4)}`;
+          ? `٪${threshold ?? 0}-`
+          : 'هدف ۱';
+    return `🔔 <b>هشدار فعال شد</b>\n<b>${this.escapeHtml(instrument)}</b> ${thresholdLabel}\nقیمت: ${price.toFixed(4)}`;
   }
 
   private async getCurrentPrice(
@@ -89,10 +89,9 @@ export class AlertsCron {
   }
 
   private resolveAssetType(instrument: string): 'GOLD' | 'CRYPTO' {
-    const goldInstruments = this.configService
-      .get<string>('GOLD_INSTRUMENTS', 'XAUTUSDT')
-      .split(',')
-      .map((item) => item.trim().toUpperCase());
+    const goldInstruments = this.normalizeCsv(
+      this.configService.get<string>('GOLD_INSTRUMENTS', 'XAUTUSDT'),
+    ).map((item) => item.toUpperCase());
 
     const normalized = instrument.toUpperCase();
     if (normalized.includes('XAU') || goldInstruments.includes(normalized)) {
@@ -118,5 +117,27 @@ export class AlertsCron {
     }
 
     return false;
+  }
+
+  private normalizeCsv(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item).trim()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    return [];
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

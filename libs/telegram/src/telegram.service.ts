@@ -94,12 +94,12 @@ export class TelegramService {
     const signalId = signal.id ?? 'unknown';
     return Markup.inlineKeyboard([
       [
-        Markup.button.callback('✅ Details', `sig:d:${signalId}`),
-        Markup.button.callback('🔔 Alert', `sig:a:${signalId}`),
+        Markup.button.callback('✅ جزئیات', `sig:d:${signalId}`),
+        Markup.button.callback('🔔 ساخت هشدار', `sig:a:${signalId}`),
       ],
       [
-        Markup.button.callback('⭐ Watchlist', `sig:w:${signalId}`),
-        Markup.button.callback('🔕 Mute 1h', `sig:m:${signalId}`),
+        Markup.button.callback('⭐ افزودن به واچ\u000cلیست', `sig:w:${signalId}`),
+        Markup.button.callback('🔕 بی\u000cصدا (۱ ساعت)', `sig:m:${signalId}`),
       ],
     ]);
   }
