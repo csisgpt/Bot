@@ -35,8 +35,8 @@ export const createRsiThresholdStrategy = (config: RsiThresholdConfig): Strategy
         time: latest.closeTime,
         confidence: 66,
         tags: ['rsi', 'mean_reversion'],
-        reason: `RSI ${currRsi.toFixed(2)} below buy threshold ${config.rsiBuyThreshold}.`,
-        why: 'RSI entered oversold territory and signals a possible mean reversion.',
+        reason: `RSI ${currRsi.toFixed(2)} پایین\u000cتر از آستانه خرید ${config.rsiBuyThreshold} است.`,
+        why: 'RSI وارد ناحیه اشباع فروش شده و احتمال بازگشت به میانگین وجود دارد.',
         indicators: {
           rsi: currRsi,
         },
@@ -56,8 +56,8 @@ export const createRsiThresholdStrategy = (config: RsiThresholdConfig): Strategy
         time: latest.closeTime,
         confidence: 66,
         tags: ['rsi', 'mean_reversion'],
-        reason: `RSI ${currRsi.toFixed(2)} above sell threshold ${config.rsiSellThreshold}.`,
-        why: 'RSI entered overbought territory and signals a possible pullback.',
+        reason: `RSI ${currRsi.toFixed(2)} بالاتر از آستانه فروش ${config.rsiSellThreshold} است.`,
+        why: 'RSI وارد ناحیه اشباع خرید شده و احتمال اصلاح وجود دارد.',
         indicators: {
           rsi: currRsi,
         },

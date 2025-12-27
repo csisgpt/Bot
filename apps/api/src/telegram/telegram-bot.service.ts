@@ -5,6 +5,7 @@ import { formatSignalDetailsMessage } from '@libs/telegram';
 import { ChatConfig, ChatType } from '@prisma/client';
 import { Markup, Telegraf } from 'telegraf';
 import type { ParseMode } from 'telegraf/types';
+import { faMessages } from './fa.messages';
 
 interface PendingAction {
   type: 'watchlist_add' | 'quiet_hours';
@@ -58,124 +59,153 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
   private registerHandlers(): void {
     this.bot.start(async (ctx) => {
-      await this.ensureChatConfig(ctx.chat);
-      await ctx.reply(
-        this.escapeHtml('Welcome! Use /menu to explore signals, watchlists, and settings.'),
-        { parse_mode: this.parseMode },
-      );
-      await this.showMenu(ctx.chat.id);
+      try {
+        const chat = ctx.chat;
+        if (!chat) return;
+        await this.ensureChatConfig(chat);
+        await ctx.reply(this.escapeHtml(faMessages.welcome), { parse_mode: this.parseMode });
+        await this.showMenu(chat.id);
+      } catch (error) {
+        this.logger.error(`Start handler failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     });
 
     this.bot.command('menu', async (ctx) => {
-      await this.ensureChatConfig(ctx.chat);
-      await this.showMenu(ctx.chat.id);
+      try {
+        const chat = ctx.chat;
+        if (!chat) return;
+        await this.ensureChatConfig(chat);
+        await this.showMenu(chat.id);
+      } catch (error) {
+        this.logger.error(`Menu handler failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     });
 
     this.bot.command('help', async (ctx) => {
-      await this.ensureChatConfig(ctx.chat);
-      await ctx.reply(this.renderHelp(), { parse_mode: this.parseMode });
+      try {
+        const chat = ctx.chat;
+        if (!chat) return;
+        await this.ensureChatConfig(chat);
+        await ctx.reply(this.renderHelp(), { parse_mode: this.parseMode });
+      } catch (error) {
+        this.logger.error(`Help handler failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     });
 
     this.bot.command('status', async (ctx) => {
-      const chatConfig = await this.ensureChatConfig(ctx.chat);
-      await ctx.reply(this.renderStatus(chatConfig), { parse_mode: this.parseMode });
+      try {
+        const chat = ctx.chat;
+        if (!chat) return;
+        const chatConfig = await this.ensureChatConfig(chat);
+        await ctx.reply(this.renderStatus(chatConfig), { parse_mode: this.parseMode });
+      } catch (error) {
+        this.logger.error(`Status handler failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     });
 
     this.bot.on('callback_query', async (ctx) => {
+      try {
+        await ctx.answerCbQuery();
+      } catch (error) {
+        this.logger.warn(`Failed to answer callback query: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
       const cbq = ctx.callbackQuery;
       const data = cbq && 'data' in cbq ? cbq.data : '';
-      const chatId =
-        ctx.chat?.id ??
-        (cbq && 'message' in cbq ? cbq.message?.chat?.id : undefined);
+      const chat = ctx.chat ?? (cbq && 'message' in cbq ? cbq.message?.chat : undefined);
+      const chatId = chat?.id;
 
       if (!chatId) {
-        // در بعضی آپدیت‌ها (rare) ممکنه chatId نداشته باشیم
-        this.logger.warn('Telegram callback without chatId');
+        this.logger.warn(faMessages.errors.noChatId);
         return;
       }
       if (typeof data !== 'string') return;
 
-      const chatConfig = await this.ensureChatConfig(ctx.chat);
-      const parts = data.split(':');
-      const [prefix, action, id, option] = parts;
+      try {
+        const chatConfig = await this.ensureChatConfig(chat);
+        const parts = data.split(':');
+        const [prefix, action, id, option] = parts;
 
-      switch (prefix) {
-        case 'm':
-          await this.handleMenuAction(chatId, action, chatConfig);
-          break;
-        case 'w':
-          await this.handleWatchlistAction(chatId, action, id, chatConfig, ctx.from?.id);
-          break;
-        case 's':
-          await this.handleSettingsAction(chatId, action, id, option, chatConfig, ctx.from?.id);
-          break;
-        case 'sig':
-          await this.handleSignalAction(chatId, action, id, option, chatConfig, ctx.from?.id);
-          break;
-        case 'a':
-          await this.handleAlertsMenu(chatId);
-          break;
-        case 'd':
-          await this.handleDigestMenu(chatId);
-          break;
-        default:
-          break;
+        switch (prefix) {
+          case 'm':
+            await this.handleMenuAction(chatId, action, chatConfig, ctx);
+            break;
+          case 'w':
+            await this.handleWatchlistAction(chatId, action, id, chatConfig, ctx.from?.id, ctx);
+            break;
+          case 's':
+            await this.handleSettingsAction(chatId, action, id, option, chatConfig, ctx.from?.id, ctx);
+            break;
+          case 'sig':
+            await this.handleSignalAction(chatId, action, id, option, chatConfig, ctx.from?.id);
+            break;
+          case 'a':
+            await this.handleAlertsMenu(chatId, ctx);
+            break;
+          case 'd':
+            await this.handleDigestMenu(chatId, ctx);
+            break;
+          default:
+            break;
+        }
+      } catch (error) {
+        this.logger.error(`Callback handler failed: ${error instanceof Error ? error.message : String(error)}`);
+        await this.safeSendMessage(chatId, faMessages.errors.temporary);
       }
-
-      await ctx.answerCbQuery();
     });
 
     this.bot.on('text', async (ctx) => {
-      const chatId = ctx.chat.id;
-      const userId = ctx.from?.id;
-      if (!userId) return;
+      try {
+        const chatId = ctx.chat?.id;
+        const userId = ctx.from?.id;
+        if (!chatId || !userId) return;
 
-      const key = this.pendingKey(chatId, userId);
-      const pending = this.pendingActions.get(key);
-      if (!pending) return;
+        const key = this.pendingKey(chatId, userId);
+        const pending = this.pendingActions.get(key);
+        if (!pending) return;
 
-      const replyToId = ctx.message.reply_to_message?.message_id;
-      if (!replyToId || replyToId !== pending.promptMessageId) return;
+        const replyToId = ctx.message.reply_to_message?.message_id;
+        if (!replyToId || replyToId !== pending.promptMessageId) return;
 
-      if (Date.now() > pending.expiresAt) {
+        if (Date.now() > pending.expiresAt) {
+          this.pendingActions.delete(key);
+          await this.safeSendMessage(chatId, faMessages.errors.promptExpired);
+          return;
+        }
+
+        if (pending.type === 'watchlist_add') {
+          await this.handleManualWatchlistAdd(ctx.chat, ctx.message.text);
+        }
+
+        if (pending.type === 'quiet_hours') {
+          await this.handleQuietHoursInput(ctx.chat, ctx.message.text);
+        }
+
         this.pendingActions.delete(key);
-        await this.bot.telegram.sendMessage(chatId, this.escapeHtml('This prompt expired. Please try again.'), {
-          parse_mode: this.parseMode,
-        });
-        return;
+      } catch (error) {
+        this.logger.error(`Text handler failed: ${error instanceof Error ? error.message : String(error)}`);
       }
-
-      if (pending.type === 'watchlist_add') {
-        await this.handleManualWatchlistAdd(ctx.chat, ctx.message.text);
-      }
-
-      if (pending.type === 'quiet_hours') {
-        await this.handleQuietHoursInput(ctx.chat, ctx.message.text);
-      }
-
-      this.pendingActions.delete(key);
     });
   }
 
-  private async handleMenuAction(chatId: number, action: string, chatConfig: ChatConfig): Promise<void> {
+  private async handleMenuAction(
+    chatId: number,
+    action: string,
+    chatConfig: ChatConfig,
+    ctx?: any,
+  ): Promise<void> {
     switch (action) {
       case 'main':
-        await this.showMenu(chatId);
+        await this.showMenu(chatId, ctx);
         return;
       case 'signals':
-        await this.bot.telegram.sendMessage(
-          chatId,
-          this.escapeHtml('Signals are running. Use /status to see current filters.'),
-          { parse_mode: this.parseMode },
-        );
+        await this.showSignalsPanel(chatId, ctx);
         return;
       case 'help':
-        await this.bot.telegram.sendMessage(chatId, this.renderHelp(), { parse_mode: this.parseMode });
+        await this.showHelpPanel(chatId, ctx);
         return;
       case 'status':
-        await this.bot.telegram.sendMessage(chatId, this.renderStatus(chatConfig), {
-          parse_mode: this.parseMode,
-        });
+        await this.showStatusPanel(chatId, chatConfig, ctx);
         return;
       default:
         return;
@@ -188,12 +218,13 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     id: string | undefined,
     chatConfig: ChatConfig,
     userId?: number,
+    ctx?: any,
   ): Promise<void> {
     const isAllowed = await this.ensureAdmin(chatId, userId, chatConfig);
     if (!isAllowed) return;
 
     if (action === 'list') {
-      await this.showWatchlist(chatId, chatConfig);
+      await this.showWatchlist(chatId, chatConfig, ctx);
       return;
     }
 
@@ -202,7 +233,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         if (!userId) return;
         const response = await this.bot.telegram.sendMessage(
           chatId,
-          this.escapeHtml('Send the symbol (e.g. BTCUSDT).'),
+          this.escapeHtml(faMessages.watchlist.manualPrompt),
           { parse_mode: this.parseMode, reply_markup: { force_reply: true } },
         );
         this.pendingActions.set(this.pendingKey(chatId, userId), {
@@ -216,13 +247,13 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (id) {
-        await this.updateWatchlist(chatId, chatConfig, id, true);
+        await this.updateWatchlist(chatId, chatConfig, id, undefined, ctx);
         return;
       }
     }
 
     if (action === 'rm' && id) {
-      await this.updateWatchlist(chatId, chatConfig, id, false);
+      await this.updateWatchlist(chatId, chatConfig, id, false, ctx);
     }
   }
 
@@ -233,12 +264,13 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     option: string | undefined,
     chatConfig: ChatConfig,
     userId?: number,
+    ctx?: any,
   ): Promise<void> {
     const isAllowed = await this.ensureAdmin(chatId, userId, chatConfig);
     if (!isAllowed) return;
 
     if (action === 'menu') {
-      await this.showSettingsMenu(chatId, chatConfig);
+      await this.showSettingsMenu(chatId, chatConfig, ctx);
       return;
     }
 
@@ -253,7 +285,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
           where: { chatId: String(chatId) },
         });
         if (updated) {
-          await this.showSettingsMenu(chatId, updated);
+          await this.showSettingsMenu(chatId, updated, ctx);
         }
       }
       return;
@@ -270,7 +302,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         where: { chatId: String(chatId) },
         data: { timeframes: Array.from(timeframes) },
       });
-      await this.showSettingsMenu(chatId, updated);
+      await this.showSettingsMenu(chatId, updated, ctx);
       return;
     }
 
@@ -286,7 +318,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         where: { chatId: String(chatId) },
         data: { assetsEnabled: Array.from(assets) },
       });
-      await this.showSettingsMenu(chatId, updated);
+      await this.showSettingsMenu(chatId, updated, ctx);
       return;
     }
 
@@ -301,7 +333,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
             where: { chatId: String(chatId) },
             data: { sendToGroup: !chatConfig.sendToGroup },
           });
-      await this.showSettingsMenu(chatId, updated);
+      await this.showSettingsMenu(chatId, updated, ctx);
       return;
     }
 
@@ -310,7 +342,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         where: { chatId: String(chatId) },
         data: { quietHoursEnabled: !chatConfig.quietHoursEnabled },
       });
-      await this.showSettingsMenu(chatId, updated);
+      await this.showSettingsMenu(chatId, updated, ctx);
       return;
     }
 
@@ -318,7 +350,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       if (!userId) return;
       const response = await this.bot.telegram.sendMessage(
         chatId,
-        this.escapeHtml('Send quiet hours in UTC (e.g. 22:00-06:00).'),
+        this.escapeHtml(faMessages.quietHours.prompt),
         { parse_mode: this.parseMode, reply_markup: { force_reply: true } },
       );
       this.pendingActions.set(this.pendingKey(chatId, userId), {
@@ -332,7 +364,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (action === 'back') {
-      await this.showMenu(chatId);
+      await this.showMenu(chatId, ctx);
     }
   }
 
@@ -349,7 +381,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     if (action === 'd') {
       const signal = await this.prismaService.signal.findUnique({ where: { id } });
       if (!signal) {
-        await this.bot.telegram.sendMessage(chatId, this.escapeHtml('Signal not found.'), {
+        await this.bot.telegram.sendMessage(chatId, this.escapeHtml(faMessages.errors.signalNotFound), {
           parse_mode: this.parseMode,
         });
         return;
@@ -382,14 +414,14 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     if (action === 'a') {
       if (!option) {
-        await this.bot.telegram.sendMessage(chatId, this.escapeHtml('Choose an alert:'), {
+        await this.bot.telegram.sendMessage(chatId, this.escapeHtml(faMessages.alerts.choose), {
           parse_mode: this.parseMode,
           reply_markup: Markup.inlineKeyboard([
             [
-              Markup.button.callback('+0.5%', `sig:a:${id}:up05`),
-              Markup.button.callback('-0.5%', `sig:a:${id}:down05`),
+              Markup.button.callback('٪۰٫۵+', `sig:a:${id}:up05`),
+              Markup.button.callback('٪۰٫۵-', `sig:a:${id}:down05`),
             ],
-            [Markup.button.callback('TP1', `sig:a:${id}:tp1`)],
+            [Markup.button.callback('هدف ۱', `sig:a:${id}:tp1`)],
           ]).reply_markup,
         });
         return;
@@ -410,11 +442,11 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     if (action === 'm') {
       if (!option) {
-        await this.bot.telegram.sendMessage(chatId, this.escapeHtml('Mute options:'), {
+        await this.bot.telegram.sendMessage(chatId, this.escapeHtml(faMessages.signals.muteOptions), {
           parse_mode: this.parseMode,
           reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('Mute instrument 1h', `sig:m:${id}:instrument`)],
-            [Markup.button.callback('Mute all 1h', `sig:m:${id}:all`)],
+            [Markup.button.callback('بی\u000cصدا کردن این نماد (۱ ساعت)', `sig:m:${id}:instrument`)],
+            [Markup.button.callback('بی\u000cصدا کردن همه (۱ ساعت)', `sig:m:${id}:all`)],
           ]).reply_markup,
         });
         return;
@@ -424,19 +456,21 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async handleAlertsMenu(chatId: number): Promise<void> {
-    await this.bot.telegram.sendMessage(
+  private async handleAlertsMenu(chatId: number, ctx?: any): Promise<void> {
+    await this.upsertPanel(
       chatId,
-      this.escapeHtml('Tap “Alert” under a signal to create quick alerts.'),
-      { parse_mode: this.parseMode },
+      `${faMessages.menu.alerts}\n\n${this.escapeHtml(faMessages.alerts.intro)}`,
+      Markup.inlineKeyboard([[Markup.button.callback(faMessages.buttons.back, 'm:main')]]).reply_markup,
+      ctx,
     );
   }
 
-  private async handleDigestMenu(chatId: number): Promise<void> {
-    await this.bot.telegram.sendMessage(
+  private async handleDigestMenu(chatId: number, ctx?: any): Promise<void> {
+    await this.upsertPanel(
       chatId,
-      this.escapeHtml('Daily report will arrive automatically at the configured time.'),
-      { parse_mode: this.parseMode },
+      `${faMessages.menu.digest}\n\n${this.escapeHtml(faMessages.digest.intro)}`,
+      Markup.inlineKeyboard([[Markup.button.callback(faMessages.buttons.back, 'm:main')]]).reply_markup,
+      ctx,
     );
   }
 
@@ -450,7 +484,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   private async handleQuietHoursInput(chat: any, text: string): Promise<void> {
     const value = text.trim();
     if (!/^[0-2]\d:[0-5]\d-[0-2]\d:[0-5]\d$/.test(value)) {
-      await this.bot.telegram.sendMessage(chat.id, this.escapeHtml('Invalid format. Use HH:MM-HH:MM.'), {
+      await this.bot.telegram.sendMessage(chat.id, this.escapeHtml(faMessages.errors.invalidQuietHours), {
         parse_mode: this.parseMode,
       });
       return;
@@ -476,14 +510,14 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     const basePrice = signal.price ?? undefined;
 
     if (option === 'tp1' && signal.tp1 == null) {
-      await this.bot.telegram.sendMessage(chatId, this.escapeHtml('TP1 not available for this signal.'), {
+      await this.bot.telegram.sendMessage(chatId, this.escapeHtml(faMessages.errors.tpUnavailable), {
         parse_mode: this.parseMode,
       });
       return;
     }
 
     if ((option === 'up05' || option === 'down05') && basePrice == null) {
-      await this.bot.telegram.sendMessage(chatId, this.escapeHtml('Price unavailable for this signal.'), {
+      await this.bot.telegram.sendMessage(chatId, this.escapeHtml(faMessages.errors.priceUnavailable), {
         parse_mode: this.parseMode,
       });
       return;
@@ -507,7 +541,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    await this.bot.telegram.sendMessage(chatId, this.escapeHtml('Alert saved ✅'), { parse_mode: this.parseMode });
+    await this.bot.telegram.sendMessage(chatId, this.escapeHtml(faMessages.alerts.saved), {
+      parse_mode: this.parseMode,
+    });
   }
 
   private async applyMute(
@@ -538,107 +574,117 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    await this.bot.telegram.sendMessage(chatId, this.escapeHtml('Muted for 1 hour.'), {
+    await this.bot.telegram.sendMessage(chatId, this.escapeHtml(faMessages.signals.muted), {
       parse_mode: this.parseMode,
     });
   }
 
-  private async showMenu(chatId: number): Promise<void> {
-    await this.bot.telegram.sendMessage(chatId, this.escapeHtml('Main menu:'), {
-      parse_mode: this.parseMode,
-      reply_markup: Markup.inlineKeyboard([
+  private async showMenu(chatId: number, ctx?: any): Promise<void> {
+    await this.upsertPanel(
+      chatId,
+      faMessages.menu.title,
+      Markup.inlineKeyboard([
         [
-          Markup.button.callback('📡 Signals', 'm:signals'),
-          Markup.button.callback('⭐ Watchlist', 'w:list'),
+          Markup.button.callback(faMessages.buttons.signals, 'm:signals'),
+          Markup.button.callback(faMessages.buttons.watchlist, 'w:list'),
         ],
         [
-          Markup.button.callback('🔔 Alerts', 'a:menu'),
-          Markup.button.callback('⚙️ Group Settings', 's:menu'),
+          Markup.button.callback(faMessages.buttons.alerts, 'a:menu'),
+          Markup.button.callback(faMessages.buttons.settings, 's:menu'),
         ],
         [
-          Markup.button.callback('🧾 Today Report', 'd:today'),
-          Markup.button.callback('🆘 Help', 'm:help'),
+          Markup.button.callback(faMessages.buttons.digest, 'd:today'),
+          Markup.button.callback(faMessages.buttons.help, 'm:help'),
         ],
       ]).reply_markup,
-    });
+      ctx,
+    );
   }
 
-  private async showWatchlist(chatId: number, chatConfig: ChatConfig): Promise<void> {
-    const list = chatConfig.watchlist.length > 0 ? chatConfig.watchlist.join(', ') : 'empty';
+  private async showWatchlist(chatId: number, chatConfig: ChatConfig, ctx?: any): Promise<void> {
+    const watchlist = chatConfig.watchlist.map((item) => item.toUpperCase());
+    const list = watchlist.length > 0 ? watchlist.join('، ') : faMessages.watchlist.empty;
     const popular = this.getPopularInstruments();
-    const buttons = popular.map((symbol) => Markup.button.callback(symbol, `w:add:${symbol}`));
-
-    await this.bot.telegram.sendMessage(chatId, this.escapeHtml(`Watchlist: ${list}`), {
-      parse_mode: this.parseMode,
-      reply_markup: Markup.inlineKeyboard([
-        buttons.slice(0, 2),
-        buttons.slice(2, 4),
-        [Markup.button.callback('➕ Add manually', 'w:add:manual')],
-        ...(chatConfig.watchlist.length > 0
-          ? chatConfig.watchlist.map((symbol) => [Markup.button.callback(`Remove ${symbol}`, `w:rm:${symbol}`)])
-          : []),
-        [Markup.button.callback('⬅️ Back', 'm:main')],
-      ]).reply_markup,
+    const watchlistSet = new Set(watchlist);
+    const buttons = popular.map((symbol) => {
+      const label = watchlistSet.has(symbol) ? `✅ ${symbol}` : `⬜ ${symbol}`;
+      return Markup.button.callback(label, `w:add:${symbol}`);
     });
+
+    const rows = [buttons.slice(0, 2), buttons.slice(2, 4), buttons.slice(4, 6)]
+      .filter((row) => row.length > 0);
+    rows.push([Markup.button.callback(faMessages.buttons.addManual, 'w:add:manual')]);
+    rows.push([Markup.button.callback(faMessages.buttons.back, 'm:main')]);
+
+    await this.upsertPanel(
+      chatId,
+      `${faMessages.menu.watchlist}\n\n<b>${faMessages.watchlist.title}:</b> ${this.escapeHtml(list)}\n${this.escapeHtml(
+        faMessages.watchlist.instructions,
+      )}`,
+      Markup.inlineKeyboard(rows).reply_markup,
+      ctx,
+    );
   }
 
-  private async showSettingsMenu(chatId: number, chatConfig: ChatConfig): Promise<void> {
-    await this.bot.telegram.sendMessage(chatId, this.renderStatus(chatConfig), {
-      parse_mode: this.parseMode,
-      reply_markup: Markup.inlineKeyboard([
+  private async showSettingsMenu(chatId: number, chatConfig: ChatConfig, ctx?: any): Promise<void> {
+    await this.upsertPanel(
+      chatId,
+      `${faMessages.menu.settings}\n\n${this.renderStatus(chatConfig)}`,
+      Markup.inlineKeyboard([
         [
-          Markup.button.callback('Min 60', 's:min:60'),
-          Markup.button.callback('Min 70', 's:min:70'),
-          Markup.button.callback('Min 80', 's:min:80'),
+          Markup.button.callback('حداقل ۶۰', 's:min:60'),
+          Markup.button.callback('حداقل ۷۰', 's:min:70'),
+          Markup.button.callback('حداقل ۸۰', 's:min:80'),
         ],
         [
-          Markup.button.callback('15m', 's:tf:15m'),
-          Markup.button.callback('1h', 's:tf:1h'),
+          Markup.button.callback('۱۵دقیقه', 's:tf:15m'),
+          Markup.button.callback('۱ساعت', 's:tf:1h'),
         ],
         [
-          Markup.button.callback('Quiet hours on/off', 's:quiet:toggle'),
-          Markup.button.callback('Set quiet hours', 's:quiet:set'),
+          Markup.button.callback(faMessages.settings.quietHoursToggle, 's:quiet:toggle'),
+          Markup.button.callback(faMessages.settings.quietHoursSet, 's:quiet:set'),
         ],
         [
-          Markup.button.callback('Toggle group', 's:dest:group'),
-          Markup.button.callback('Toggle channel', 's:dest:channel'),
+          Markup.button.callback(faMessages.settings.destGroup, 's:dest:group'),
+          Markup.button.callback(faMessages.settings.destChannel, 's:dest:channel'),
         ],
         [
-          Markup.button.callback('GOLD', 's:asset:GOLD'),
-          Markup.button.callback('CRYPTO', 's:asset:CRYPTO'),
+          Markup.button.callback(faMessages.settings.assetsGold, 's:asset:GOLD'),
+          Markup.button.callback(faMessages.settings.assetsCrypto, 's:asset:CRYPTO'),
         ],
-        [Markup.button.callback('⬅️ Back', 'm:main')],
+        [Markup.button.callback(faMessages.buttons.back, 'm:main')],
       ]).reply_markup,
-    });
+      ctx,
+    );
   }
 
   private renderHelp(): string {
-    return [
-      '🆘 <b>Help</b>',
-      '• /menu — open the main menu',
-      '• /status — show chat configuration',
-      '• Use buttons under a signal for details, alerts, watchlist, or mute.',
-    ].join('\n');
+    return faMessages.help;
   }
 
   private renderStatus(chatConfig: ChatConfig): string {
-    const assets = chatConfig.assetsEnabled.length > 0 ? chatConfig.assetsEnabled.join(', ') : 'default';
-    const timeframes = chatConfig.timeframes.length > 0 ? chatConfig.timeframes.join(', ') : 'default';
-    const watchlist = chatConfig.watchlist.length > 0 ? chatConfig.watchlist.join(', ') : 'default';
+    const assets =
+      chatConfig.assetsEnabled.length > 0
+        ? chatConfig.assetsEnabled.join(', ')
+        : 'پیش\u000cفرض';
+    const timeframes =
+      chatConfig.timeframes.length > 0 ? chatConfig.timeframes.join(', ') : 'پیش\u000cفرض';
+    const watchlist =
+      chatConfig.watchlist.length > 0 ? chatConfig.watchlist.join(', ') : 'پیش\u000cفرض';
     const quiet = chatConfig.quietHoursEnabled
       ? `${chatConfig.quietHoursStart ?? '??'}-${chatConfig.quietHoursEnd ?? '??'} UTC`
-      : 'off';
+      : faMessages.toggles.off;
 
     return [
-      '⚙️ <b>Chat settings</b>',
-      `<b>Enabled:</b> ${chatConfig.isEnabled ? 'yes' : 'no'}`,
-      `<b>Assets:</b> ${this.escapeHtml(assets)}`,
-      `<b>Timeframes:</b> ${this.escapeHtml(timeframes)}`,
-      `<b>Watchlist:</b> ${this.escapeHtml(watchlist)}`,
-      `<b>Min confidence:</b> ${chatConfig.minConfidence}%`,
-      `<b>Quiet hours:</b> ${this.escapeHtml(quiet)}`,
-      `<b>Send to group:</b> ${chatConfig.sendToGroup ? 'on' : 'off'}`,
-      `<b>Send to channel:</b> ${chatConfig.sendToChannel ? 'on' : 'off'}`,
+      faMessages.status.title,
+      `${faMessages.status.enabled} ${chatConfig.isEnabled ? faMessages.toggles.on : faMessages.toggles.off}`,
+      `${faMessages.status.assets} ${this.escapeHtml(assets)}`,
+      `${faMessages.status.timeframes} ${this.escapeHtml(timeframes)}`,
+      `${faMessages.status.watchlist} ${this.escapeHtml(watchlist)}`,
+      `${faMessages.status.minConfidence} ${chatConfig.minConfidence}%`,
+      `${faMessages.status.quietHours} ${this.escapeHtml(quiet)}`,
+      `${faMessages.status.sendToGroup} ${chatConfig.sendToGroup ? faMessages.toggles.on : faMessages.toggles.off}`,
+      `${faMessages.status.sendToChannel} ${chatConfig.sendToChannel ? faMessages.toggles.on : faMessages.toggles.off}`,
     ].join('\n');
   }
 
@@ -647,6 +693,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     chatConfig: ChatConfig,
     symbol: string,
     forceAdd?: boolean,
+    ctx?: any,
   ): Promise<void> {
     const normalized = symbol.toUpperCase();
     const watchlist = new Set(chatConfig.watchlist.map((item) => item.toUpperCase()));
@@ -668,20 +715,17 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       data: { watchlist: Array.from(watchlist) },
     });
 
-    await this.showWatchlist(chatId, updated);
+    await this.showWatchlist(chatId, updated, ctx);
   }
 
   private getPopularInstruments(): string[] {
-    const gold = this.configService.get<string>('GOLD_INSTRUMENTS', 'XAUTUSDT')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const crypto = this.configService.get<string>('CRYPTO_INSTRUMENTS', 'BTCUSDT,ETHUSDT')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    return Array.from(new Set([...gold, ...crypto])).slice(0, 6);
+    const gold = this.normalizeCsv(this.configService.get('GOLD_INSTRUMENTS', 'XAUTUSDT'));
+    const crypto = this.normalizeCsv(this.configService.get('CRYPTO_INSTRUMENTS', 'BTCUSDT,ETHUSDT'));
+    const legacy = this.normalizeCsv(this.configService.get('BINANCE_SYMBOLS', ''));
+    const combined = crypto.length > 0 ? [...gold, ...crypto] : [...gold, ...legacy];
+    const fallback = ['BTCUSDT', 'ETHUSDT', 'XAUTUSDT'];
+    const unique = Array.from(new Set(combined.length > 0 ? combined : fallback));
+    return unique.map((item) => item.toUpperCase()).slice(0, 6);
   }
 
   private async ensureChatConfig(chat?: any): Promise<ChatConfig> {
@@ -729,7 +773,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       if (!allowed) {
         await this.bot.telegram.sendMessage(
           chatId,
-          this.escapeHtml('Only group admins can change watchlist or settings.'),
+          this.escapeHtml(faMessages.errors.adminOnly),
           { parse_mode: this.parseMode },
         );
       }
@@ -742,6 +786,83 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
   private pendingKey(chatId: number, userId: number): string {
     return `${chatId}:${userId}`;
+  }
+
+  private async showSignalsPanel(chatId: number, ctx?: any): Promise<void> {
+    await this.upsertPanel(
+      chatId,
+      `${faMessages.menu.signals}\n\n${this.escapeHtml(faMessages.signals.running)}`,
+      Markup.inlineKeyboard([[Markup.button.callback(faMessages.buttons.back, 'm:main')]]).reply_markup,
+      ctx,
+    );
+  }
+
+  private async showHelpPanel(chatId: number, ctx?: any): Promise<void> {
+    await this.upsertPanel(
+      chatId,
+      `${faMessages.menu.help}\n\n${this.renderHelp()}`,
+      Markup.inlineKeyboard([[Markup.button.callback(faMessages.buttons.back, 'm:main')]]).reply_markup,
+      ctx,
+    );
+  }
+
+  private async showStatusPanel(chatId: number, chatConfig: ChatConfig, ctx?: any): Promise<void> {
+    await this.upsertPanel(
+      chatId,
+      `${faMessages.menu.status}\n\n${this.renderStatus(chatConfig)}`,
+      Markup.inlineKeyboard([[Markup.button.callback(faMessages.buttons.back, 'm:main')]]).reply_markup,
+      ctx,
+    );
+  }
+
+  private async upsertPanel(
+    chatId: number,
+    text: string,
+    keyboard: any,
+    ctx?: any,
+  ): Promise<void> {
+    const messageId =
+      ctx?.callbackQuery && 'message' in ctx.callbackQuery
+        ? ctx.callbackQuery.message?.message_id
+        : undefined;
+
+    if (messageId) {
+      try {
+        await this.bot.telegram.editMessageText(chatId, messageId, undefined, text, {
+          parse_mode: this.parseMode,
+          reply_markup: keyboard,
+        });
+        return;
+      } catch (error) {
+        this.logger.warn(`Failed to edit panel message: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    await this.bot.telegram.sendMessage(chatId, text, {
+      parse_mode: this.parseMode,
+      reply_markup: keyboard,
+    });
+  }
+
+  private normalizeCsv(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item).trim()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    return [];
+  }
+
+  private async safeSendMessage(chatId: number, text: string): Promise<void> {
+    try {
+      await this.bot.telegram.sendMessage(chatId, this.escapeHtml(text), { parse_mode: this.parseMode });
+    } catch (error) {
+      this.logger.warn(`Failed to send message to ${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private escapeHtml(value: string): string {
