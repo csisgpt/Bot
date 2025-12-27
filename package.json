@@ -6,7 +6,7 @@
   "scripts": {
     "start:dev": "nest start --watch",
     "start": "node dist/apps/api/main.js",
-    "build": "nest build",
+    "build": "pnpm prisma:generate && pnpm build:api && pnpm build:worker",
     "dev:api": "nest start api --watch",
     "dev:worker": "nest start worker --watch",
     "build:api": "nest build api",
