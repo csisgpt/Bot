@@ -1,8 +1,6 @@
 import { z } from "zod";
 
-/**
- * Helpers
- */
+/** helpers (همون‌هایی که قبلاً نوشتی) */
 const toInt = (def?: number) =>
   z.preprocess((v) => {
     if (v === undefined || v === null || v === "") return def;
@@ -38,29 +36,29 @@ const csv = (def: string[] = []) =>
 
 const nonEmpty = z.string().trim().min(1);
 
-const EnvSchema = z
+/**
+ * 1) اول base object رو بساز
+ * 2) همینجا passthrough کن
+ * 3) بعد superRefine اضافه کن
+ */
+const envObject = z
   .object({
-    // App
     NODE_ENV: z.enum(["development", "test", "production"]).default("production"),
     APP_NAME: z.string().trim().default("crypto-signals-bot"),
     TZ: z.string().trim().default("UTC"),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
-    // Ports
     PORT: toInt(3000).pipe(z.number().int().min(1).max(65535)),
     WORKER_PORT: toInt(3001).pipe(z.number().int().min(1).max(65535)),
 
-    // Database
     DATABASE_URL: z.string().trim().min(1, "DATABASE_URL is required"),
     PRISMA_LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
-    // Redis
     REDIS_URL: z.string().trim().optional(),
     REDIS_HOST: z.string().trim().default("localhost"),
     REDIS_PORT: toInt(6379).pipe(z.number().int().min(1).max(65535)),
     REDIS_PASSWORD: z.string().optional().default(""),
 
-    // Queue
     QUEUE_SIGNALS_NAME: z.string().trim().default("signals"),
     QUEUE_CONCURRENCY: toInt(5).pipe(z.number().int().min(1).max(200)),
 
@@ -68,7 +66,6 @@ const EnvSchema = z
     SIGNALS_TELEGRAM_JOB_BACKOFF_DELAY_MS: toInt(3000).pipe(z.number().int().min(0).max(60_000)),
     SIGNALS_TELEGRAM_JOB_PRIORITY: toInt(1).pipe(z.number().int().min(0).max(10)),
 
-    // Telegram
     TELEGRAM_BOT_TOKEN: nonEmpty,
     TELEGRAM_BOT_ID: z.string().trim().optional(),
     TELEGRAM_BOT_USERNAME: z.string().trim().optional(),
@@ -81,20 +78,17 @@ const EnvSchema = z
     TELEGRAM_SIGNAL_CHANNEL_ID: z.string().trim().optional(),
     TELEGRAM_SIGNAL_CHANNEL_USERNAME: z.string().trim().optional(),
     TELEGRAM_SIGNAL_CHANNEL_TITLE: z.string().trim().optional(),
-
     TELEGRAM_SIGNAL_GROUP_ID: z.string().trim().optional(),
     TELEGRAM_SIGNAL_GROUP_TITLE: z.string().trim().optional(),
 
     TELEGRAM_PARSE_MODE: z.enum(["HTML", "MarkdownV2", "Markdown"]).default("HTML"),
     TELEGRAM_DISABLE_WEB_PAGE_PREVIEW: toBool(true).default(true),
 
-    // Assets / Instruments
     ASSETS_ENABLED: csv(["GOLD", "CRYPTO"]).default(["GOLD", "CRYPTO"]),
     GOLD_INSTRUMENTS: csv([]).default([]),
     CRYPTO_INSTRUMENTS: csv([]).default([]),
     BINANCE_SYMBOLS: z.string().trim().optional(),
 
-    // Price providers
     PRICE_PROVIDER_GOLD: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
     PRICE_PROVIDER_CRYPTO: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
 
@@ -104,13 +98,11 @@ const EnvSchema = z
     PRICE_TICKER_POST_TO_GROUP: toBool(true).default(true),
     PRICE_TICKER_POST_TO_CHANNEL: toBool(true).default(true),
 
-    // Binance REST
     BINANCE_BASE_URL: z.string().trim().default("https://data-api.binance.vision"),
     BINANCE_INTERVAL: z.string().trim().default("15m"),
     BINANCE_KLINES_LIMIT: toInt(200).pipe(z.number().int().min(1).max(1000)),
     BINANCE_REQUEST_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
 
-    // Strategies
     STRATEGIES_ENABLED: csv(["ema_rsi", "rsi_threshold", "breakout", "macd"]).default([
       "ema_rsi",
       "rsi_threshold",
@@ -120,7 +112,6 @@ const EnvSchema = z
 
     EMA_FAST_PERIOD: toInt(12).pipe(z.number().int().min(1).max(500)),
     EMA_SLOW_PERIOD: toInt(26).pipe(z.number().int().min(1).max(500)),
-
     RSI_PERIOD: toInt(14).pipe(z.number().int().min(1).max(500)),
     RSI_BUY_THRESHOLD: toInt(30).pipe(z.number().int().min(0).max(100)),
     RSI_SELL_THRESHOLD: toInt(70).pipe(z.number().int().min(0).max(100)),
@@ -131,22 +122,19 @@ const EnvSchema = z
     MACD_SLOW_PERIOD: toInt(26).pipe(z.number().int().min(1).max(500)),
     MACD_SIGNAL_PERIOD: toInt(9).pipe(z.number().int().min(1).max(500)),
 
-    // Risk levels
     ENABLE_RISK_LEVELS: toBool(true).default(true),
     ATR_PERIOD: toInt(14).pipe(z.number().int().min(1).max(500)),
     SL_ATR_MULTIPLIER: toFloat(1.5).pipe(z.number().min(0.1).max(50)),
     TP1_ATR_MULTIPLIER: toFloat(2).pipe(z.number().min(0.1).max(50)),
     TP2_ATR_MULTIPLIER: toFloat(3).pipe(z.number().min(0.1).max(50)),
 
-    // Dedupe / cooldown
     SIGNAL_DEDUPE_TTL_SECONDS: toInt(7200).pipe(z.number().int().min(1).max(7 * 24 * 3600)),
     SIGNAL_MIN_COOLDOWN_SECONDS: toInt(1).pipe(z.number().int().min(0).max(3600)),
 
-    // TradingView Webhook
     TRADINGVIEW_WEBHOOK_ENABLED: toBool(true).default(true),
     TRADINGVIEW_WEBHOOK_SECRET: z.string().trim().optional().default(""),
-
     TRADINGVIEW_SEND_ALL: toBool(false).default(false),
+
     TRADINGVIEW_DEFAULT_ASSET_TYPE: z.enum(["GOLD", "CRYPTO"]).default("GOLD"),
     TRADINGVIEW_DEFAULT_INSTRUMENT: z.string().trim().default("XAUTUSDT"),
     TRADINGVIEW_DEFAULT_INTERVAL: z.string().trim().default("1s"),
@@ -154,7 +142,6 @@ const EnvSchema = z
 
     TRADINGVIEW_PRICE_FALLBACK_TIMEOUT_MS: toInt(2000).pipe(z.number().int().min(0).max(30_000)),
 
-    // TradingView Email (optional)
     TRADINGVIEW_EMAIL_ENABLED: toBool(false).default(false),
     TRADINGVIEW_IMAP_HOST: z.string().trim().optional(),
     TRADINGVIEW_IMAP_PORT: toInt(993).pipe(z.number().int().min(1).max(65535)),
@@ -162,55 +149,41 @@ const EnvSchema = z
     TRADINGVIEW_IMAP_PASS: z.string().optional(),
     TRADINGVIEW_EMAIL_FOLDER: z.string().trim().default("INBOX"),
 
-    // Proxy
     HTTP_PROXY: z.string().trim().optional(),
     HTTPS_PROXY: z.string().trim().optional(),
     ALL_PROXY: z.string().trim().optional(),
     NO_PROXY: z.string().trim().optional(),
 
-    // Binance WS
     BINANCE_WS_ENABLED: toBool(false).default(false),
     BINANCE_WS_BASE_URL: z.string().trim().default("wss://stream.binance.com:9443"),
 
-    // Runtime flags
     RUN_API: toBool(true).default(true),
     RUN_WORKER: toBool(false).default(false),
     MIGRATE_ON_START: toBool(false).default(false),
 
-    // Keepalive
     RENDER_KEEPALIVE_ENABLED: toBool(false).default(false),
     RENDER_KEEPALIVE_URL: z.string().trim().optional(),
   })
-  .superRefine((env, ctx) => {
-    // If REDIS_URL empty, require host/port (we already default them, so this is mostly informational)
-    if (!env.REDIS_URL && !env.REDIS_HOST) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["REDIS_HOST"],
-        message: "Either REDIS_URL or REDIS_HOST must be provided",
-      });
-    }
-
-    // TradingView secret requirement if webhook enabled
-    if (env.TRADINGVIEW_WEBHOOK_ENABLED && !env.TRADINGVIEW_WEBHOOK_SECRET) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["TRADINGVIEW_WEBHOOK_SECRET"],
-        message: "TRADINGVIEW_WEBHOOK_SECRET is required when TRADINGVIEW_WEBHOOK_ENABLED=true",
-      });
-    }
-
-    // Keepalive url requirement if enabled
-    if (env.RENDER_KEEPALIVE_ENABLED && !env.RENDER_KEEPALIVE_URL) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["RENDER_KEEPALIVE_URL"],
-        message: "RENDER_KEEPALIVE_URL is required when RENDER_KEEPALIVE_ENABLED=true",
-      });
-    }
-  })
-  // IMPORTANT: don't drop unknown env vars
   .passthrough();
 
-export type Env = z.infer<typeof EnvSchema>;
-export { EnvSchema };
+export const envSchema = envObject.superRefine((env, ctx) => {
+  if (env.TRADINGVIEW_WEBHOOK_ENABLED && !env.TRADINGVIEW_WEBHOOK_SECRET) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TRADINGVIEW_WEBHOOK_SECRET"],
+      message: "TRADINGVIEW_WEBHOOK_SECRET is required when TRADINGVIEW_WEBHOOK_ENABLED=true",
+    });
+  }
+
+  if (env.RENDER_KEEPALIVE_ENABLED && !env.RENDER_KEEPALIVE_URL) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["RENDER_KEEPALIVE_URL"],
+      message: "RENDER_KEEPALIVE_URL is required when RENDER_KEEPALIVE_ENABLED=true",
+    });
+  }
+});
+
+// برای اینکه هم core.module قدیمی نشکنه هم اسم جدید داشته باشی:
+export const EnvSchema = envSchema;
+export type Env = z.infer<typeof envSchema>;
