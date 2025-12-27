@@ -5,8 +5,10 @@ interface BreakoutConfig {
 }
 
 export const createBreakoutStrategy = (config: BreakoutConfig): Strategy => ({
-  name: 'breakout',
-  run: ({ candles, instrument, interval, assetType }) => {
+  id: 'breakout',
+  displayName: 'Breakout',
+  requiredIndicators: ['high', 'low'],
+  evaluate: ({ candles, instrument, interval, assetType }) => {
     if (candles.length < config.lookback + 1) {
       return null;
     }
@@ -33,6 +35,11 @@ export const createBreakoutStrategy = (config: BreakoutConfig): Strategy => ({
         reason: `Close ${latest.close.toFixed(4)} broke above ${config.lookback}-period high ${high.toFixed(
           4,
         )}.`,
+        why: 'Price closed above the recent high, signaling breakout momentum.',
+        indicators: {
+          lookbackHigh: high,
+          lookbackLow: low,
+        },
       };
     }
 
@@ -52,6 +59,11 @@ export const createBreakoutStrategy = (config: BreakoutConfig): Strategy => ({
         reason: `Close ${latest.close.toFixed(4)} broke below ${config.lookback}-period low ${low.toFixed(
           4,
         )}.`,
+        why: 'Price closed below the recent low, signaling downside momentum.',
+        indicators: {
+          lookbackHigh: high,
+          lookbackLow: low,
+        },
       };
     }
 

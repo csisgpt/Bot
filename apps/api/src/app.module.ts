@@ -8,12 +8,13 @@ import { AdminController } from './admin.controller';
 import { HealthController } from './health.controller';
 import { TradingViewWebhookController } from './webhooks/tradingview.controller';
 import { RenderKeepAliveCron } from './render-keepalive.cron';
-
+import { TelegramBotModule } from './telegram/telegram-bot.module';
 
 @Module({
   imports: [
     CoreModule,
     TelegramModule,
+    TelegramBotModule,
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [CoreModule],

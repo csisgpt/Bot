@@ -10,9 +10,12 @@ export class SendTelegramProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<Signal | { chatId: string; text: string; parseMode?: string }>): Promise<void> {
+  async process(
+    job: Job<{ chatId: string; signal: Signal } | { chatId: string; text: string; parseMode?: string }>,
+  ): Promise<void> {
     if (job.name === 'sendTelegramSignal') {
-      await this.telegramService.sendSignal(job.data as Signal);
+      const payload = job.data as { chatId: string; signal: Signal };
+      await this.telegramService.sendSignalToChat(payload.signal, payload.chatId);
       return;
     }
 

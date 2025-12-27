@@ -11,6 +11,8 @@ import { PriceTickerCron } from './cron/price-ticker.cron';
 import { ConfigService } from '@nestjs/config';
 import { SignalsProcessor } from './queues/signals.processor';
 import { TradingViewEmailIngestService } from './tradingview/tradingview-email.service';
+import { AlertsCron } from './cron/alerts.cron';
+import { DigestCron } from './cron/digest.cron';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { TradingViewEmailIngestService } from './tradingview/tradingview-email.s
   providers: [
     SignalsCron,
     PriceTickerCron,
+    AlertsCron,
+    DigestCron,
     SignalsProcessor,
     TradingViewEmailIngestService,
   ],

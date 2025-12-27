@@ -10,8 +10,10 @@ interface EmaRsiConfig {
 }
 
 export const createEmaRsiStrategy = (config: EmaRsiConfig): Strategy => ({
-  name: 'ema_rsi',
-  run: ({ candles, instrument, interval, assetType }) => {
+  id: 'ema_rsi',
+  displayName: 'EMA + RSI',
+  requiredIndicators: ['ema_fast', 'ema_slow', 'rsi'],
+  evaluate: ({ candles, instrument, interval, assetType }) => {
     if (candles.length < Math.max(config.emaSlowPeriod, config.rsiPeriod) + 2) {
       return null;
     }
@@ -46,6 +48,12 @@ export const createEmaRsiStrategy = (config: EmaRsiConfig): Strategy => ({
         reason: `EMA${config.emaFastPeriod} crossed above EMA${config.emaSlowPeriod} with RSI ${currRsi.toFixed(
           2,
         )}.`,
+        why: 'Fast EMA crossed above slow EMA while RSI stayed below overbought levels.',
+        indicators: {
+          emaFast: currFast,
+          emaSlow: currSlow,
+          rsi: currRsi,
+        },
       };
     }
 
@@ -65,6 +73,12 @@ export const createEmaRsiStrategy = (config: EmaRsiConfig): Strategy => ({
         reason: `EMA${config.emaFastPeriod} crossed below EMA${config.emaSlowPeriod} with RSI ${currRsi.toFixed(
           2,
         )}.`,
+        why: 'Fast EMA crossed below slow EMA while RSI stayed above oversold levels.',
+        indicators: {
+          emaFast: currFast,
+          emaSlow: currSlow,
+          rsi: currRsi,
+        },
       };
     }
 

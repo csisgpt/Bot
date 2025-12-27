@@ -60,8 +60,9 @@ describe('TradingView ingest', () => {
   });
 
   it('fills missing price via price provider', async () => {
-    const storeSignal = vi.fn();
+    const storeSignal = vi.fn(async (signal: Signal) => signal);
     const addQueue = vi.fn();
+    const chatConfigFindMany = vi.fn().mockResolvedValue([]);
     const processor = new TradingViewIngestProcessor(
       {
         get: (key: string, fallback?: string) => {
@@ -71,6 +72,7 @@ describe('TradingView ingest', () => {
             TRADINGVIEW_DEFAULT_INTERVAL: '15m',
             TRADINGVIEW_DEFAULT_STRATEGY: 'tradingview',
             BINANCE_INTERVAL: '15m',
+            TELEGRAM_SIGNAL_GROUP_ID: '123',
           };
           return defaults[key] ?? fallback ?? '';
         },
@@ -82,6 +84,7 @@ describe('TradingView ingest', () => {
           getCandles: async () => [{ close: 2000 }],
         }),
       } as never,
+      { chatConfig: { findMany: chatConfigFindMany } } as never,
       { add: addQueue } as never,
     );
 
