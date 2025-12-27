@@ -13,7 +13,7 @@ import { RenderKeepAliveCron } from './render-keepalive.cron';
   imports: [
     CoreModule,
     TelegramModule,
-    ScheduleModule.forRoot()
+    ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [CoreModule],
       inject: [ConfigService],
