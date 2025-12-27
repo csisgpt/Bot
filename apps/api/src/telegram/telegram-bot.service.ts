@@ -82,7 +82,17 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.bot.on('callback_query', async (ctx) => {
-      const data = ctx.callbackQuery?.data ?? '';
+      const cbq = ctx.callbackQuery;
+      const data = cbq && 'data' in cbq ? cbq.data : '';
+      const chatId =
+        ctx.chat?.id ??
+        (cbq && 'message' in cbq ? cbq.message?.chat?.id : undefined);
+
+      if (!chatId) {
+        // در بعضی آپدیت‌ها (rare) ممکنه chatId نداشته باشیم
+        this.logger.warn('Telegram callback without chatId');
+        return;
+      }
       if (typeof data !== 'string') return;
 
       const chatConfig = await this.ensureChatConfig(ctx.chat);
@@ -91,22 +101,22 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
       switch (prefix) {
         case 'm':
-          await this.handleMenuAction(ctx.chat.id, action, chatConfig);
+          await this.handleMenuAction(chatId, action, chatConfig);
           break;
         case 'w':
-          await this.handleWatchlistAction(ctx.chat.id, action, id, chatConfig, ctx.from?.id);
+          await this.handleWatchlistAction(chatId, action, id, chatConfig, ctx.from?.id);
           break;
         case 's':
-          await this.handleSettingsAction(ctx.chat.id, action, id, option, chatConfig, ctx.from?.id);
+          await this.handleSettingsAction(chatId, action, id, option, chatConfig, ctx.from?.id);
           break;
         case 'sig':
-          await this.handleSignalAction(ctx.chat.id, action, id, option, chatConfig, ctx.from?.id);
+          await this.handleSignalAction(chatId, action, id, option, chatConfig, ctx.from?.id);
           break;
         case 'a':
-          await this.handleAlertsMenu(ctx.chat.id);
+          await this.handleAlertsMenu(chatId);
           break;
         case 'd':
-          await this.handleDigestMenu(ctx.chat.id);
+          await this.handleDigestMenu(chatId);
           break;
         default:
           break;
@@ -284,13 +294,13 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       const updated =
         id === 'channel'
           ? await this.prismaService.chatConfig.update({
-              where: { chatId: String(chatId) },
-              data: { sendToChannel: !chatConfig.sendToChannel },
-            })
+            where: { chatId: String(chatId) },
+            data: { sendToChannel: !chatConfig.sendToChannel },
+          })
           : await this.prismaService.chatConfig.update({
-              where: { chatId: String(chatId) },
-              data: { sendToGroup: !chatConfig.sendToGroup },
-            });
+            where: { chatId: String(chatId) },
+            data: { sendToGroup: !chatConfig.sendToGroup },
+          });
       await this.showSettingsMenu(chatId, updated);
       return;
     }
@@ -523,7 +533,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     await this.prismaService.chatConfig.update({
       where: { chatId: String(chatId) },
       data: {
-        mutedUntil,
+        mutedUntil: muteUntil,
         mutedInstruments: Array.from(mutedInstruments),
       },
     });

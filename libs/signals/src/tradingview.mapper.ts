@@ -117,7 +117,16 @@ export const mapTradingViewPayloadToSignal = (
   const sl = parseNumber(payload.sl ?? payload.stopLoss);
   const tp1 = parseNumber(payload.tp1 ?? payload.takeProfit1);
   const tp2 = parseNumber(payload.tp2 ?? payload.takeProfit2);
-
+  const indicators =
+    payload.indicators
+      ? Object.fromEntries(
+        Object.entries(payload.indicators).map(([k, v]) => {
+          if (v === null || v === undefined) return [k, null];
+          if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return [k, v];
+          return [k, String(v)]; // هر چیز دیگری → string
+        }),
+      )
+      : undefined;
   return {
     source: 'TRADINGVIEW',
     assetType,
@@ -132,7 +141,7 @@ export const mapTradingViewPayloadToSignal = (
     tags: tags.length > 0 ? tags : ['tradingview'],
     reason,
     why,
-    indicators: (payload.indicators ?? undefined) as Record<string, unknown> | undefined,
+    indicators,
     externalId,
     sl: sl ?? null,
     tp1: tp1 ?? null,
