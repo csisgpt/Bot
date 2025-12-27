@@ -5,7 +5,7 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "start:dev": "nest start --watch",
-    "start": "nest start",
+    "start": "node dist/apps/api/main.js",
     "build": "nest build",
     "dev:api": "nest start api --watch",
     "dev:worker": "nest start worker --watch",
