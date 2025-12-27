@@ -2,7 +2,7 @@
   "name": "crypto-signals-bot",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@9.0.0",
+  "packageManager": "pnpm@8.15.9",
   "scripts": {
     "start:dev": "nest start --watch",
     "start": "node dist/apps/api/main.js",
