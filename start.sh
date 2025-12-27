@@ -9,11 +9,6 @@ is_true() {
   [ "$1" = "true" ] || [ "$1" = "TRUE" ] || [ "$1" = "1" ]
 }
 
-if ! is_true "$RUN_API" && ! is_true "$RUN_WORKER"; then
-  echo "ERROR: RUN_API and RUN_WORKER are both false; nothing to run." >&2
-  exit 1
-fi
-
 PIDS=""
 
 terminate() {
@@ -23,6 +18,11 @@ terminate() {
 }
 
 trap 'terminate' INT TERM
+
+if ! is_true "$RUN_API" && ! is_true "$RUN_WORKER"; then
+  echo "ERROR: RUN_API and RUN_WORKER are both false; nothing to run." >&2
+  exit 1
+fi
 
 if is_true "$RUN_API" && is_true "$MIGRATE_ON_START"; then
   echo "Running prisma migrations..."
