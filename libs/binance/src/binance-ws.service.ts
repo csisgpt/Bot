@@ -175,10 +175,13 @@ export class BinanceWsService implements OnModuleInit, OnModuleDestroy {
     }, this.reconnectMs);
   }
 
-  private parseList(value?: string): string[] {
-    return (value ?? '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
+  private parseList(value?: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value.map(String).map((x) => x.trim()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      return value.split(',').map((x) => x.trim()).filter(Boolean);
+    }
+    return [];
   }
 }
