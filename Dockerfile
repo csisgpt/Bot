@@ -10,21 +10,12 @@ COPY tsconfig*.json nest-cli.json ./
 COPY apps ./apps
 COPY libs ./libs
 
-RUN pnpm install --no-frozen-lockfile
+# اگر روی لیارا/رندر lockfile سخت‌گیرانه مشکل داد، می‌تونی --no-frozen-lockfile بذاری
+RUN pnpm install --frozen-lockfile
 RUN pnpm prisma:generate
+RUN pnpm build:api && pnpm build:worker
 
-# اگر اسم پروژه‌ها api/worker نبود، این خط کمک می‌کنه بفهمیم
-RUN echo "==== nest-cli.json ====" && cat nest-cli.json
-
-RUN pnpm exec nest build api
-RUN pnpm exec nest build worker
-
-RUN test -d dist/apps/api
-RUN test -d dist/apps/worker
-RUN find dist/apps/api -type f -name main.js | head -n 1 | grep -q .
-RUN find dist/apps/worker -type f -name main.js | head -n 1 | grep -q .
-
-FROM node:22-bookworm-slim AS runtime
+FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 
@@ -35,8 +26,8 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 COPY package.json ./
 COPY scripts ./scripts
-
 COPY start.sh ./start.sh
+
 RUN chmod +x ./start.sh ./scripts/*.sh
 
 EXPOSE 3000
