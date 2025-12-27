@@ -10,14 +10,40 @@ CREATE TYPE "DeliveryStatus" AS ENUM ('SENT', 'FAILED');
 -- CreateEnum
 CREATE TYPE "ChatType" AS ENUM ('private', 'group', 'channel');
 
--- AlterTable
+-- ------------------------------------------------------------
+-- Fix: Convert Signal.source TEXT -> SignalSource ENUM safely
+-- Problem: default on "source" (text) can't be cast automatically.
+-- Solution: drop default, normalize values, cast with USING, restore default.
+-- ------------------------------------------------------------
+
+-- 1) Drop default first (avoid "default cannot be cast" error)
+ALTER TABLE "Signal" ALTER COLUMN "source" DROP DEFAULT;
+
+-- 2) Normalize existing values before casting (safe even on empty DB)
+UPDATE "Signal"
+SET "source" = 'BINANCE'
+WHERE "source" IS NULL;
+
+UPDATE "Signal"
+SET "source" = 'BINANCE'
+WHERE "source" NOT IN ('BINANCE', 'TRADINGVIEW');
+
+-- 3) Convert column type using explicit cast
 ALTER TABLE "Signal"
-  ALTER COLUMN "source" TYPE "SignalSource" USING "source"::"SignalSource",
-  ADD COLUMN     "why" TEXT,
-  ADD COLUMN     "indicators" JSONB,
-  ADD COLUMN     "sl" DOUBLE PRECISION,
-  ADD COLUMN     "tp1" DOUBLE PRECISION,
-  ADD COLUMN     "tp2" DOUBLE PRECISION;
+  ALTER COLUMN "source" TYPE "SignalSource"
+  USING ("source"::text::"SignalSource");
+
+-- 4) Restore default using enum literal
+ALTER TABLE "Signal"
+  ALTER COLUMN "source" SET DEFAULT 'BINANCE'::"SignalSource";
+
+-- 5) Add the new columns (keep them nullable by default)
+ALTER TABLE "Signal"
+  ADD COLUMN "why" TEXT,
+  ADD COLUMN "indicators" JSONB,
+  ADD COLUMN "sl" DOUBLE PRECISION,
+  ADD COLUMN "tp1" DOUBLE PRECISION,
+  ADD COLUMN "tp2" DOUBLE PRECISION;
 
 -- CreateTable
 CREATE TABLE "ChatConfig" (
