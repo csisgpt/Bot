@@ -11,7 +11,6 @@ COPY apps ./apps
 COPY libs ./libs
 
 # اگر روی لیارا/رندر lockfile سخت‌گیرانه مشکل داد، می‌تونی --no-frozen-lockfile بذاری
-RUN corepack enable
 RUN corepack prepare pnpm@8.15.9 --activate
 RUN pnpm --version
 RUN pnpm install --frozen-lockfile
