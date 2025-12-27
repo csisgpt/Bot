@@ -226,6 +226,11 @@ The script checks Postgres, Redis, and sends a Telegram test message if `TELEGRA
 - **Liara Postgres**: include `sslmode=require` in `DATABASE_URL`.
 - **Liara Redis**: use `rediss://` if TLS is required by your instance.
 
+## Existing DB migration rename
+
+If you already deployed with the previous migration folder names, follow the one-time rename steps in
+[`docs/migrations-rename.md`](docs/migrations-rename.md) before running `pnpm prisma:migrate:deploy`.
+
 ## Roadmap
 
 - Admin panel for signal monitoring and configuration.

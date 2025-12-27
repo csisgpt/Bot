@@ -8,6 +8,10 @@ import type { ParseMode } from 'telegraf/types';
 
 interface PendingAction {
   type: 'watchlist_add' | 'quiet_hours';
+  chatId: number;
+  userId: number;
+  promptMessageId: number;
+  expiresAt: number;
 }
 
 @Injectable()
@@ -113,8 +117,23 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     this.bot.on('text', async (ctx) => {
       const chatId = ctx.chat.id;
-      const pending = this.pendingActions.get(String(chatId));
+      const userId = ctx.from?.id;
+      if (!userId) return;
+
+      const key = this.pendingKey(chatId, userId);
+      const pending = this.pendingActions.get(key);
       if (!pending) return;
+
+      const replyToId = ctx.message.reply_to_message?.message_id;
+      if (!replyToId || replyToId !== pending.promptMessageId) return;
+
+      if (Date.now() > pending.expiresAt) {
+        this.pendingActions.delete(key);
+        await this.bot.telegram.sendMessage(chatId, this.escapeHtml('This prompt expired. Please try again.'), {
+          parse_mode: this.parseMode,
+        });
+        return;
+      }
 
       if (pending.type === 'watchlist_add') {
         await this.handleManualWatchlistAdd(ctx.chat, ctx.message.text);
@@ -124,7 +143,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         await this.handleQuietHoursInput(ctx.chat, ctx.message.text);
       }
 
-      this.pendingActions.delete(String(chatId));
+      this.pendingActions.delete(key);
     });
   }
 
@@ -170,9 +189,18 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     if (action === 'add') {
       if (id === 'manual') {
-        this.pendingActions.set(String(chatId), { type: 'watchlist_add' });
-        await this.bot.telegram.sendMessage(chatId, this.escapeHtml('Send the symbol (e.g. BTCUSDT).'), {
-          parse_mode: this.parseMode,
+        if (!userId) return;
+        const response = await this.bot.telegram.sendMessage(
+          chatId,
+          this.escapeHtml('Send the symbol (e.g. BTCUSDT).'),
+          { parse_mode: this.parseMode, reply_markup: { force_reply: true } },
+        );
+        this.pendingActions.set(this.pendingKey(chatId, userId), {
+          type: 'watchlist_add',
+          chatId,
+          userId,
+          promptMessageId: response.message_id,
+          expiresAt: Date.now() + 2 * 60 * 1000,
         });
         return;
       }
@@ -277,12 +305,19 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (action === 'quiet' && id === 'set') {
-      this.pendingActions.set(String(chatId), { type: 'quiet_hours' });
-      await this.bot.telegram.sendMessage(
+      if (!userId) return;
+      const response = await this.bot.telegram.sendMessage(
         chatId,
         this.escapeHtml('Send quiet hours in UTC (e.g. 22:00-06:00).'),
-        { parse_mode: this.parseMode },
+        { parse_mode: this.parseMode, reply_markup: { force_reply: true } },
       );
+      this.pendingActions.set(this.pendingKey(chatId, userId), {
+        type: 'quiet_hours',
+        chatId,
+        userId,
+        promptMessageId: response.message_id,
+        expiresAt: Date.now() + 2 * 60 * 1000,
+      });
       return;
     }
 
@@ -693,6 +728,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Failed to check admin status: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
+  }
+
+  private pendingKey(chatId: number, userId: number): string {
+    return `${chatId}:${userId}`;
   }
 
   private escapeHtml(value: string): string {
