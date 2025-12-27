@@ -8,8 +8,10 @@ interface RsiThresholdConfig {
 }
 
 export const createRsiThresholdStrategy = (config: RsiThresholdConfig): Strategy => ({
-  name: 'rsi_threshold',
-  run: ({ candles, instrument, interval, assetType }) => {
+  id: 'rsi_threshold',
+  displayName: 'RSI Threshold',
+  requiredIndicators: ['rsi'],
+  evaluate: ({ candles, instrument, interval, assetType }) => {
     if (candles.length < config.rsiPeriod + 1) {
       return null;
     }
@@ -34,6 +36,10 @@ export const createRsiThresholdStrategy = (config: RsiThresholdConfig): Strategy
         confidence: 66,
         tags: ['rsi', 'mean_reversion'],
         reason: `RSI ${currRsi.toFixed(2)} below buy threshold ${config.rsiBuyThreshold}.`,
+        why: 'RSI entered oversold territory and signals a possible mean reversion.',
+        indicators: {
+          rsi: currRsi,
+        },
       };
     }
 
@@ -51,6 +57,10 @@ export const createRsiThresholdStrategy = (config: RsiThresholdConfig): Strategy
         confidence: 66,
         tags: ['rsi', 'mean_reversion'],
         reason: `RSI ${currRsi.toFixed(2)} above sell threshold ${config.rsiSellThreshold}.`,
+        why: 'RSI entered overbought territory and signals a possible pullback.',
+        indicators: {
+          rsi: currRsi,
+        },
       };
     }
 

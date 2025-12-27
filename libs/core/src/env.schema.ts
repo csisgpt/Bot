@@ -69,6 +69,10 @@ const envObject = z
     TELEGRAM_BOT_TOKEN: nonEmpty,
     TELEGRAM_BOT_ID: z.string().trim().optional(),
     TELEGRAM_BOT_USERNAME: z.string().trim().optional(),
+    TELEGRAM_USE_POLLING: toBool(false).default(false),
+    TELEGRAM_WEBHOOK_URL: z.string().trim().optional(),
+    TELEGRAM_WEBHOOK_SECRET: z.string().trim().optional(),
+    TELEGRAM_ADMIN_ONLY_GROUP_SETTINGS: toBool(true).default(true),
 
     TELEGRAM_OWNER_USER_ID: z.string().trim().optional(),
     TELEGRAM_OWNER_USERNAME: z.string().trim().optional(),
@@ -88,6 +92,8 @@ const envObject = z
     GOLD_INSTRUMENTS: csv([]).default([]),
     CRYPTO_INSTRUMENTS: csv([]).default([]),
     BINANCE_SYMBOLS: z.string().trim().optional(),
+    DEFAULT_TIMEFRAMES: csv(["15m", "1h"]).default(["15m", "1h"]),
+    MONITORING_ENABLED: toBool(true).default(true),
 
     PRICE_PROVIDER_GOLD: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
     PRICE_PROVIDER_CRYPTO: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
@@ -131,6 +137,11 @@ const envObject = z
     SIGNAL_DEDUPE_TTL_SECONDS: toInt(7200).pipe(z.number().int().min(1).max(7 * 24 * 3600)),
     SIGNAL_MIN_COOLDOWN_SECONDS: toInt(1).pipe(z.number().int().min(0).max(3600)),
 
+    DIGEST_TIME_UTC: z.string().trim().default("20:00"),
+    DIGEST_ENABLED: toBool(true).default(true),
+    DIGEST_POST_TO_GROUP: toBool(true).default(true),
+    DIGEST_POST_TO_CHANNEL: toBool(false).default(false),
+
     TRADINGVIEW_WEBHOOK_ENABLED: toBool(true).default(true),
     TRADINGVIEW_WEBHOOK_SECRET: z.string().trim().optional().default(""),
     TRADINGVIEW_SEND_ALL: toBool(false).default(false),
@@ -142,12 +153,17 @@ const envObject = z
 
     TRADINGVIEW_PRICE_FALLBACK_TIMEOUT_MS: toInt(2000).pipe(z.number().int().min(0).max(30_000)),
 
+    WEBHOOK_MAX_BODY_KB: toInt(64).pipe(z.number().int().min(1).max(1024)),
+    RATE_LIMIT_WEBHOOK_RPM: toInt(60).pipe(z.number().int().min(1).max(6000)),
+
     TRADINGVIEW_EMAIL_ENABLED: toBool(false).default(false),
     TRADINGVIEW_IMAP_HOST: z.string().trim().optional(),
     TRADINGVIEW_IMAP_PORT: toInt(993).pipe(z.number().int().min(1).max(65535)),
     TRADINGVIEW_IMAP_SECURE: toBool(true).default(true),
+    TRADINGVIEW_IMAP_USER: z.string().trim().optional(),
     TRADINGVIEW_IMAP_PASS: z.string().optional(),
     TRADINGVIEW_EMAIL_FOLDER: z.string().trim().default("INBOX"),
+    TRADINGVIEW_EMAIL_POLL_SECONDS: toInt(30).pipe(z.number().int().min(5).max(3600)),
 
     HTTP_PROXY: z.string().trim().optional(),
     HTTPS_PROXY: z.string().trim().optional(),
@@ -173,6 +189,23 @@ export const envSchema = envObject.superRefine((env, ctx) => {
       path: ["TRADINGVIEW_WEBHOOK_SECRET"],
       message: "TRADINGVIEW_WEBHOOK_SECRET is required when TRADINGVIEW_WEBHOOK_ENABLED=true",
     });
+  }
+
+  if (!env.TELEGRAM_USE_POLLING) {
+    if (!env.TELEGRAM_WEBHOOK_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TELEGRAM_WEBHOOK_URL"],
+        message: "TELEGRAM_WEBHOOK_URL is required when TELEGRAM_USE_POLLING=false",
+      });
+    }
+    if (!env.TELEGRAM_WEBHOOK_SECRET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TELEGRAM_WEBHOOK_SECRET"],
+        message: "TELEGRAM_WEBHOOK_SECRET is required when TELEGRAM_USE_POLLING=false",
+      });
+    }
   }
 
   if (env.RENDER_KEEPALIVE_ENABLED && !env.RENDER_KEEPALIVE_URL) {

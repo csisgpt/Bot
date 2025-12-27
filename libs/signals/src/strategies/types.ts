@@ -7,7 +7,11 @@ export interface StrategyContext {
   assetType: AssetType;
 }
 
+export type SignalCandidate = Omit<Signal, 'id'>;
+
 export interface Strategy {
-  name: string;
-  run(context: StrategyContext): Signal | null;
+  id: string;
+  displayName: string;
+  requiredIndicators?: string[];
+  evaluate(context: StrategyContext): SignalCandidate | null;
 }

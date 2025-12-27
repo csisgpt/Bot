@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Telegraf } from 'telegraf';
+import { Markup, Telegraf } from 'telegraf';
 import { Signal } from '@libs/signals';
 import { formatSignalMessage } from './telegram.formatter';
 import type { ParseMode } from 'telegraf/types';
@@ -38,34 +38,69 @@ export class TelegramService {
   }
 
   async sendSignal(signal: Signal): Promise<void> {
-    const message = formatSignalMessage(signal);
-    await this.sendMessageToDestinations(message);
+    const destinations: string[] = [];
+    if (this.channelId) destinations.push(this.channelId);
+    if (this.groupId) destinations.push(this.groupId);
+
+    if (destinations.length === 0) {
+      this.logger.warn('No Telegram destination configured.');
+      return;
+    }
+
+    await Promise.all(destinations.map((chatId) => this.sendSignalToChat(signal, chatId)));
   }
 
-  async sendMessage(chatId: string, message: string, parseMode?: ParseMode): Promise<void> {
-    await this.bot.telegram.sendMessage(chatId, message, {
-      parse_mode: parseMode ?? this.parseMode,
-      link_preview_options: { is_disabled: this.disableWebPreview }
+  async sendSignalToChat(signal: Signal, chatId: string): Promise<number> {
+    const message = formatSignalMessage(signal);
+    const keyboard = this.buildSignalKeyboard(signal);
+    const response = await this.bot.telegram.sendMessage(chatId, message, {
+      parse_mode: this.parseMode,
+      link_preview_options: { is_disabled: this.disableWebPreview },
+      reply_markup: keyboard.reply_markup,
     });
+
+    return response.message_id;
+  }
+
+  async sendMessage(chatId: string, message: string, parseMode?: ParseMode): Promise<number> {
+    const response = await this.bot.telegram.sendMessage(chatId, message, {
+      parse_mode: parseMode ?? this.parseMode,
+      link_preview_options: { is_disabled: this.disableWebPreview },
+    });
+    return response.message_id;
   }
 
   private async sendMessageToDestinations(message: string): Promise<void> {
     if (this.channelId) {
       await this.bot.telegram.sendMessage(this.channelId, message, {
         parse_mode: this.parseMode,
-        link_preview_options: { is_disabled: this.disableWebPreview }
+        link_preview_options: { is_disabled: this.disableWebPreview },
       });
     }
 
     if (this.groupId) {
       await this.bot.telegram.sendMessage(this.groupId, message, {
         parse_mode: this.parseMode,
-        link_preview_options: { is_disabled: this.disableWebPreview }
+        link_preview_options: { is_disabled: this.disableWebPreview },
       });
     }
 
     if (!this.channelId && !this.groupId) {
       this.logger.warn('No Telegram destination configured.');
     }
+  }
+
+  private buildSignalKeyboard(signal: Signal) {
+    const signalId = signal.id ?? 'unknown';
+    return Markup.inlineKeyboard([
+      [
+        Markup.button.callback('✅ Details', `sig:d:${signalId}`),
+        Markup.button.callback('🔔 Alert', `sig:a:${signalId}`),
+      ],
+      [
+        Markup.button.callback('⭐ Watchlist', `sig:w:${signalId}`),
+        Markup.button.callback('🔕 Mute 1h', `sig:m:${signalId}`),
+      ],
+    ]);
   }
 }

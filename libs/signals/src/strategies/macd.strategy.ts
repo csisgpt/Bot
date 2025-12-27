@@ -8,8 +8,10 @@ interface MacdConfig {
 }
 
 export const createMacdStrategy = (config: MacdConfig): Strategy => ({
-  name: 'macd',
-  run: ({ candles, instrument, interval, assetType }) => {
+  id: 'macd',
+  displayName: 'MACD Crossover',
+  requiredIndicators: ['macd', 'signal'],
+  evaluate: ({ candles, instrument, interval, assetType }) => {
     if (candles.length < config.slowPeriod + config.signalPeriod) {
       return null;
     }
@@ -44,6 +46,11 @@ export const createMacdStrategy = (config: MacdConfig): Strategy => ({
         confidence: 74,
         tags: ['macd', 'momentum'],
         reason: `MACD crossed above signal (${currMacd.toFixed(4)} > ${currSignal.toFixed(4)}).`,
+        why: 'MACD line crossed above the signal line, showing bullish momentum.',
+        indicators: {
+          macd: currMacd,
+          signal: currSignal,
+        },
       };
     }
 
@@ -61,6 +68,11 @@ export const createMacdStrategy = (config: MacdConfig): Strategy => ({
         confidence: 74,
         tags: ['macd', 'momentum'],
         reason: `MACD crossed below signal (${currMacd.toFixed(4)} < ${currSignal.toFixed(4)}).`,
+        why: 'MACD line crossed below the signal line, showing bearish momentum.',
+        indicators: {
+          macd: currMacd,
+          signal: currSignal,
+        },
       };
     }
 

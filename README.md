@@ -57,6 +57,7 @@ Signals bot for Binance Spot data that generates trading alerts and sends them t
 - `GET /health` (worker)
 - `POST /admin/test-telegram`
 - `POST /webhooks/tradingview`
+- `POST /telegram/webhook`
 
 For the admin Telegram test endpoint, provide either:
 
@@ -124,6 +125,50 @@ Use `ATR_PERIOD`, `SL_ATR_MULTIPLIER`, `TP1_ATR_MULTIPLIER`, and `TP2_ATR_MULTIP
 - `SIGNAL_DEDUPE_TTL_SECONDS` prevents duplicate alerts for the same candle/strategy/side.
 - `SIGNAL_MIN_COOLDOWN_SECONDS` enforces a cooldown per asset + instrument + strategy.
 
+### Telegram bot modes
+
+#### Local dev with polling
+
+Set polling mode so the bot listens via long polling:
+
+```bash
+TELEGRAM_USE_POLLING=true
+```
+
+Run the API and worker, then open your bot in Telegram and run `/menu`.
+
+#### Production with webhook
+
+1. Set webhook env values:
+
+   ```bash
+   TELEGRAM_USE_POLLING=false
+   TELEGRAM_WEBHOOK_URL=https://<your-host>/telegram/webhook
+   TELEGRAM_WEBHOOK_SECRET=change-me
+   ```
+
+2. Register the webhook with Telegram:
+
+   ```bash
+   curl -X POST \"https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook\" \\
+     -d \"url=https://<your-host>/telegram/webhook\" \\
+     -d \"secret_token=change-me\"
+   ```
+
+Telegram will include the `x-telegram-bot-api-secret-token` header for verification.
+
+### Chat configuration
+
+Chat configuration is stored per chat (`ChatConfig`) and drives:
+
+- Watchlist instruments (per chat)
+- Timeframes and asset toggles
+- Minimum confidence
+- Quiet hours
+- Destination toggles (group vs channel)
+
+If a chat has no overrides, env defaults are used instead.
+
 ### TradingView webhook (paid plan)
 
 1. Set `TRADINGVIEW_WEBHOOK_ENABLED=true`.
@@ -177,9 +222,14 @@ The script checks Postgres, Redis, and sends a Telegram test message if `TELEGRA
 ## Troubleshooting
 
 - **Telegram bot**: ensure the bot is an admin in the channel/group you configured.
-- **Long polling vs webhook**: this app uses polling via the Telegram API; no webhook is required.
+- **Long polling vs webhook**: use `TELEGRAM_USE_POLLING=true` for local dev, or configure the webhook for production.
 - **Liara Postgres**: include `sslmode=require` in `DATABASE_URL`.
 - **Liara Redis**: use `rediss://` if TLS is required by your instance.
+
+## Existing DB migration rename
+
+If you already deployed with the previous migration folder names, follow the one-time rename steps in
+[`docs/migrations-rename.md`](docs/migrations-rename.md) before running `pnpm prisma:migrate:deploy`.
 
 ## Roadmap
 

@@ -17,6 +17,9 @@ export class StrategyRegistry {
     const emaFastPeriod = this.configService.get<number>('EMA_FAST_PERIOD', 12);
     const emaSlowPeriod = this.configService.get<number>('EMA_SLOW_PERIOD', 26);
     const breakoutLookback = this.configService.get<number>('BREAKOUT_LOOKBACK', 20);
+    const macdFastPeriod = this.configService.get<number>('MACD_FAST_PERIOD', 12);
+    const macdSlowPeriod = this.configService.get<number>('MACD_SLOW_PERIOD', 26);
+    const macdSignalPeriod = this.configService.get<number>('MACD_SIGNAL_PERIOD', 9);
 
     this.strategies = [
       createEmaRsiStrategy({
@@ -28,7 +31,11 @@ export class StrategyRegistry {
       }),
       createRsiThresholdStrategy({ rsiPeriod, rsiBuyThreshold, rsiSellThreshold }),
       createBreakoutStrategy({ lookback: breakoutLookback }),
-      createMacdStrategy({ fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }),
+      createMacdStrategy({
+        fastPeriod: macdFastPeriod,
+        slowPeriod: macdSlowPeriod,
+        signalPeriod: macdSignalPeriod,
+      }),
     ];
   }
 
@@ -36,12 +43,12 @@ export class StrategyRegistry {
     return this.strategies;
   }
 
-  getByNames(names: string[]): Strategy[] {
-    const normalized = names.map((name) => name.trim()).filter(Boolean);
+  getByIds(ids: string[]): Strategy[] {
+    const normalized = ids.map((name) => name.trim()).filter(Boolean);
     if (normalized.length === 0) {
       return this.strategies;
     }
 
-    return this.strategies.filter((strategy) => normalized.includes(strategy.name));
+    return this.strategies.filter((strategy) => normalized.includes(strategy.id));
   }
 }

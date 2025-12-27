@@ -108,11 +108,15 @@ export const mapTradingViewPayloadToSignal = (
   const confidence = parseNumber(payload.confidence) ?? 0;
   const tags = normalizeTags(payload.tags);
   const baseReason = (payload.reason ?? payload.message ?? 'TradingView alert') as string;
+  const why = (payload.why ?? payload.explanation) as string | undefined;
   const reason =
     parsedPrice === undefined && priceFallback === undefined
       ? `${baseReason} (price unavailable)`
       : baseReason;
   const externalId = (payload.externalId ?? payload.id) as string | undefined;
+  const sl = parseNumber(payload.sl ?? payload.stopLoss);
+  const tp1 = parseNumber(payload.tp1 ?? payload.takeProfit1);
+  const tp2 = parseNumber(payload.tp2 ?? payload.takeProfit2);
 
   return {
     source: 'TRADINGVIEW',
@@ -127,7 +131,12 @@ export const mapTradingViewPayloadToSignal = (
     confidence,
     tags: tags.length > 0 ? tags : ['tradingview'],
     reason,
+    why,
+    indicators: (payload.indicators ?? undefined) as Record<string, unknown> | undefined,
     externalId,
+    sl: sl ?? null,
+    tp1: tp1 ?? null,
+    tp2: tp2 ?? null,
     rawPayload: rawText ?? payload,
   };
 };

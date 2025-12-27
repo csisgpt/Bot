@@ -8,8 +8,8 @@ import { Prisma } from '@prisma/client';
 export class SignalsService {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async storeSignal(signal: Signal): Promise<void> {
-    await this.prismaService.signal.create({
+  async storeSignal(signal: Signal): Promise<Signal> {
+    const created = await this.prismaService.signal.create({
       data: {
         source: signal.source ?? 'BINANCE',
         assetType: signal.assetType,
@@ -23,10 +23,20 @@ export class SignalsService {
         confidence: signal.confidence,
         tags: signal.tags,
         reason: signal.reason,
+        why: signal.why ?? undefined,
+        indicators: signal.indicators ?? undefined,
         levels: signal.levels ? (signal.levels as any) : undefined,
-                externalId: signal.externalId ?? undefined,
+        sl: signal.sl ?? signal.levels?.sl ?? undefined,
+        tp1: signal.tp1 ?? signal.levels?.tp1 ?? undefined,
+        tp2: signal.tp2 ?? signal.levels?.tp2 ?? undefined,
+        externalId: signal.externalId ?? undefined,
         rawPayload: signal.rawPayload ?? undefined,
       },
     });
+
+    return {
+      ...signal,
+      id: created.id,
+    };
   }
 }

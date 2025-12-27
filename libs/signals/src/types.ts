@@ -14,6 +14,7 @@ export interface SignalLevels {
 }
 
 export interface Signal {
+  id?: string;
   source: SignalSource;
   assetType: AssetType;
   instrument: string;
@@ -26,7 +27,12 @@ export interface Signal {
   confidence: number;
   tags: string[];
   reason: string;
+  why?: string;
+  indicators?: Record<string, number | string | boolean | null>;
   levels?: SignalLevels;
+  sl?: number | null;
+  tp1?: number | null;
+  tp2?: number | null;
   externalId?: string;
   rawPayload?: unknown;
 }

@@ -9,23 +9,117 @@ datasource db {
 }
 
 model Signal {
-  id        String   @id @default(uuid())
-  source    String   @default("BINANCE")
-  assetType String
+  id         String       @id @default(uuid())
+  source     SignalSource @default(BINANCE)
+  assetType  String
   instrument String
-  interval  String
-  strategy  String
-  kind      String
-  side      String
-  time      DateTime
-  price     Float?
+  interval   String
+  strategy   String
+  kind       String
+  side       String
+  time       DateTime
+  price      Float?
   confidence Int
-  tags      String[]
-  reason    String
-  levels    Json?
+  tags       String[]
+  reason     String
+  why        String?
+  indicators Json?
+  levels     Json?
+  sl         Float?
+  tp1        Float?
+  tp2        Float?
   externalId String?
   rawPayload Json?
-  createdAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([assetType, instrument, interval, time])
+  @@index([externalId])
+  @@index([createdAt])
+}
+
+model ChatConfig {
+  id                String   @id @default(uuid())
+  chatId            String   @unique
+  chatType          ChatType
+  title             String?
+  isEnabled         Boolean  @default(true)
+  assetsEnabled     String[] @default([])
+  timeframes        String[] @default([])
+  watchlist         String[] @default([])
+  minConfidence     Int      @default(70)
+  quietHoursEnabled Boolean  @default(false)
+  quietHoursStart   String?
+  quietHoursEnd     String?
+  sendToGroup       Boolean  @default(true)
+  sendToChannel     Boolean  @default(false)
+  mutedUntil        DateTime?
+  mutedInstruments  String[] @default([])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([chatType])
+}
+
+model AlertRule {
+  id         String        @id @default(uuid())
+  userId     String
+  chatId     String
+  instrument String
+  type       AlertRuleType
+  threshold  Float?
+  basePrice  Float?
+  isActive   Boolean       @default(true)
+  expiresAt  DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@index([userId])
+  @@index([chatId])
+  @@index([instrument])
+  @@index([expiresAt])
+}
+
+model SignalDeliveryLog {
+  id        String         @id @default(uuid())
+  signalId  String
+  chatId    String
+  messageId String
+  status    DeliveryStatus
+  error     String?
+  createdAt DateTime       @default(now())
+
+  @@index([signalId])
+  @@index([chatId])
+}
+
+model SignalFeedback {
+  id        String   @id @default(uuid())
+  signalId  String
+  userId    String
+  value     Int
+  createdAt DateTime @default(now())
+
+  @@unique([signalId, userId])
+  @@index([signalId])
+}
+
+enum SignalSource {
+  BINANCE
+  TRADINGVIEW
+}
+
+enum AlertRuleType {
+  UP_PCT
+  DOWN_PCT
+  TP1
+}
+
+enum DeliveryStatus {
+  SENT
+  FAILED
+}
+
+enum ChatType {
+  private
+  group
+  channel
 }
