@@ -6,11 +6,14 @@ import { TelegramModule } from '@libs/telegram';
 import { AdminController } from './admin.controller';
 import { HealthController } from './health.controller';
 import { TradingViewWebhookController } from './webhooks/tradingview.controller';
+import { RenderKeepAliveCron } from './render-keepalive.cron';
+
 
 @Module({
   imports: [
     CoreModule,
     TelegramModule,
+    ScheduleModule.forRoot()
     BullModule.forRootAsync({
       imports: [CoreModule],
       inject: [ConfigService],
@@ -21,5 +24,6 @@ import { TradingViewWebhookController } from './webhooks/tradingview.controller'
     BullModule.registerQueue({ name: SIGNALS_QUEUE_NAME }),
   ],
   controllers: [AdminController, HealthController, TradingViewWebhookController],
+  providers: [RenderKeepAliveCron],
 })
 export class AppModule {}
