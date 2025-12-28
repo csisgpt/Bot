@@ -107,6 +107,8 @@ MARKET_DATA_TIMEFRAMES=1m
 
 Legacy mode (PR1 ingest) is used when `MARKET_DATA_INGEST_ENABLED=false`. In that mode, `CANDLE_INGEST_ENABLED` and `CANDLE_AGGREGATE_ENABLED` control the legacy Binance-only ingest/aggregation.
 For PR3 mode, keep `MARKET_DATA_INGEST_ENABLED=true` and leave legacy ingest flags on their defaults (they are ignored while v3 is enabled).
+When `LEGACY_CANDLE_COMPAT_ENABLED=true`, Binance candles are also written to the legacy `Candle` table so PR2 signals continue to work.
+Legacy Binance WS price ingest is disabled in V3 mode (set `PRICE_INGEST_ENABLED=false`).
 
 WebSocket/REST endpoints:
 

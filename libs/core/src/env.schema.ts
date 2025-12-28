@@ -100,6 +100,7 @@ const envObject = z
     MARKET_DATA_INGEST_ENABLED: toBool(true).default(true),
     MARKET_DATA_TIMEFRAMES: csv(["1m"]).default(["1m"]),
     MARKET_DATA_TICKER_TTL_SECONDS: toInt(120).pipe(z.number().int().min(5).max(3600)),
+    LEGACY_CANDLE_COMPAT_ENABLED: toBool(true).default(true),
 
     PRICE_PROVIDER_GOLD: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
     PRICE_PROVIDER_CRYPTO: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),

@@ -31,6 +31,10 @@ export class BinanceWsService implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     const enabled = this.configService.get<boolean>('BINANCE_WS_ENABLED', true);
     const priceIngestEnabled = this.configService.get<boolean>('PRICE_INGEST_ENABLED', true);
+    if (this.configService.get<boolean>('MARKET_DATA_INGEST_ENABLED', false)) {
+      this.logger.warn('وب‌سوکت بایننس غیرفعال شد چون بازار چندمنبعی فعال است');
+      return;
+    }
     if (!enabled || !priceIngestEnabled) {
       return;
     }

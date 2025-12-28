@@ -19,6 +19,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
   private readonly enabled: boolean;
   private readonly ttlSeconds: number;
   private readonly timeframes: string[];
+  private readonly legacyCandleCompatEnabled: boolean;
   private readonly providerListeners = new Map<string, () => void>();
 
   constructor(
@@ -34,6 +35,10 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
     this.enabled = this.configService.get<boolean>('MARKET_DATA_INGEST_ENABLED', true);
     this.ttlSeconds = this.configService.get<number>('MARKET_DATA_TICKER_TTL_SECONDS', 120);
     this.timeframes = this.configService.get<string[]>('MARKET_DATA_TIMEFRAMES', ['1m']);
+    this.legacyCandleCompatEnabled = this.configService.get<boolean>(
+      'LEGACY_CANDLE_COMPAT_ENABLED',
+      true,
+    );
   }
 
   async onModuleInit(): Promise<void> {
@@ -140,37 +145,39 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    await this.prismaService.candle.upsert({
-      where: {
-        source_instrument_timeframe_time: {
-          source: candle.provider.toUpperCase(),
+    if (this.legacyCandleCompatEnabled && candle.provider === 'binance') {
+      await this.prismaService.candle.upsert({
+        where: {
+          source_instrument_timeframe_time: {
+            source: 'BINANCE',
+            instrument: candle.canonicalSymbol,
+            timeframe: candle.timeframe,
+            time: new Date(candle.openTime),
+          },
+        },
+        update: {
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+          rawPayload: candle,
+        },
+        create: {
+          source: 'BINANCE',
+          assetType,
           instrument: candle.canonicalSymbol,
           timeframe: candle.timeframe,
           time: new Date(candle.openTime),
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+          rawPayload: candle,
         },
-      },
-      update: {
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
-        rawPayload: candle,
-      },
-      create: {
-        source: candle.provider.toUpperCase(),
-        assetType,
-        instrument: candle.canonicalSymbol,
-        timeframe: candle.timeframe,
-        time: new Date(candle.openTime),
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
-        rawPayload: candle,
-      },
-    });
+      });
+    }
 
     await this.marketDataQueue.add('candle.close', candle, {
       removeOnComplete: true,
