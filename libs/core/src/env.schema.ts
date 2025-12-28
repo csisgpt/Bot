@@ -120,6 +120,7 @@ const envObject = z
     SIGNAL_COOLDOWN_SECONDS: toInt(600).pipe(z.number().int().min(0).max(24 * 3600)),
     SIGNAL_ENGINE_CONCURRENCY: toInt(5).pipe(z.number().int().min(1).max(50)),
     SIGNAL_STRATEGY_NAME: z.string().trim().default("MVP_V1"),
+    LEGACY_SIGNALS_CRON_ENABLED: toBool(false).default(false),
 
     BINANCE_BASE_URL: z.string().trim().default("https://data-api.binance.vision"),
     BINANCE_INTERVAL: z.string().trim().default("15m"),

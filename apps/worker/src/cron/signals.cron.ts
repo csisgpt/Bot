@@ -39,6 +39,18 @@ export class SignalsCron {
 
   @Cron('*/1 * * * *')
   async handleCron(): Promise<void> {
+    const legacyCronEnabled = this.configService.get<boolean>('LEGACY_SIGNALS_CRON_ENABLED', false);
+    if (!legacyCronEnabled) {
+      this.logger.debug('Legacy signals cron disabled (LEGACY_SIGNALS_CRON_ENABLED=false).');
+      return;
+    }
+
+    const signalEngineEnabled = this.configService.get<boolean>('SIGNAL_ENGINE_ENABLED', true);
+    if (signalEngineEnabled) {
+      this.logger.debug('Legacy signals cron skipped because SIGNAL_ENGINE_ENABLED=true.');
+      return;
+    }
+
     const monitoringEnabled = this.configService.get<boolean>('MONITORING_ENABLED', true);
     if (!monitoringEnabled) {
       this.logger.debug('Monitoring disabled (MONITORING_ENABLED=false).');

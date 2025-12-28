@@ -9,6 +9,8 @@ Signals Engine reads candles exclusively from Postgres (Prisma `Candle` table), 
 3. `Signal` insert + `SignalProcessingState` update
 4. Optional enqueue: BullMQ `sendTelegramSignal`
 
+> The Signals Engine replaces the legacy `SignalsCron`. Keep `LEGACY_SIGNALS_CRON_ENABLED=false` to avoid dual signal generation.
+
 ## Environment keys
 | Key | Default | Description |
 | --- | --- | --- |
@@ -19,6 +21,7 @@ Signals Engine reads candles exclusively from Postgres (Prisma `Candle` table), 
 | `SIGNAL_COOLDOWN_SECONDS` | `600` | Cooldown after producing a signal. |
 | `SIGNAL_ENGINE_CONCURRENCY` | `5` | Async concurrency for symbol/timeframe processing. |
 | `SIGNAL_STRATEGY_NAME` | `MVP_V1` | Strategy name persisted on signals. |
+| `LEGACY_SIGNALS_CRON_ENABLED` | `false` | Keep legacy cron disabled to avoid duplicate signals. |
 
 ## Edge cases & skip reasons
 | Reason | Trigger |
