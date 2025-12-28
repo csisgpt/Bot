@@ -1,9 +1,8 @@
-import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Queue } from 'bullmq';
-import { PrismaService, RedisService, SIGNALS_QUEUE_NAME } from '@libs/core';
+import { PrismaService, RedisService } from '@libs/core';
 import { MonitoringPlanService } from '../market-data/monitoring-plan.service';
+import { NotificationOrchestratorService } from '../notifications/notification-orchestrator.service';
 
 const SOURCE = 'BINANCE';
 const SIGNAL_KIND = 'ENGINE';
@@ -42,7 +41,7 @@ export class SignalsEngineService implements OnModuleInit, OnModuleDestroy {
     private readonly redisService: RedisService,
     private readonly monitoringPlanService: MonitoringPlanService,
     private readonly configService: ConfigService,
-    @InjectQueue(SIGNALS_QUEUE_NAME) private readonly signalsQueue: Queue,
+    private readonly notificationOrchestrator: NotificationOrchestratorService,
   ) {}
 
   onModuleInit(): void {
@@ -247,7 +246,7 @@ export class SignalsEngineService implements OnModuleInit, OnModuleDestroy {
       if (cooldownSeconds > 0) {
         await this.redisService.set(cooldownKey, '1', 'EX', cooldownSeconds);
       }
-      await this.enqueueSignal(storedSignal, dedupKey);
+      await this.enqueueSignal(storedSignal);
 
       return { status: 'produced' };
     } catch (error) {
@@ -287,52 +286,10 @@ export class SignalsEngineService implements OnModuleInit, OnModuleDestroy {
       externalId: string | null;
       rawPayload: unknown | null;
     },
-    dedupKey: string,
   ): Promise<void> {
-    const fallbackChannelId = this.configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '');
-    const fallbackGroupId = this.configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '');
-    const chatId = fallbackChannelId || fallbackGroupId;
-
-    if (!chatId) {
-      this.logger.warn(
-        `Signal produced (${storedSignal.instrument} ${storedSignal.interval} ${storedSignal.side}) but no Telegram destination configured.`,
-      );
-      return;
-    }
-
-    await this.signalsQueue.add(
-      'sendTelegramSignal',
-      {
-        chatId,
-        signal: {
-          id: storedSignal.id,
-          source: storedSignal.source as 'BINANCE' | 'TRADINGVIEW',
-          assetType: storedSignal.assetType as 'GOLD' | 'CRYPTO',
-          instrument: storedSignal.instrument,
-          interval: storedSignal.interval,
-          strategy: storedSignal.strategy,
-          kind: storedSignal.kind,
-          side: storedSignal.side as 'BUY' | 'SELL' | 'NEUTRAL',
-          price: storedSignal.price ?? null,
-          time: storedSignal.time.getTime(),
-          confidence: storedSignal.confidence,
-          tags: storedSignal.tags ?? [],
-          reason: storedSignal.reason,
-          why: storedSignal.why ?? undefined,
-          indicators: storedSignal.indicators ?? undefined,
-          levels: storedSignal.levels ?? undefined,
-          sl: storedSignal.sl ?? undefined,
-          tp1: storedSignal.tp1 ?? undefined,
-          tp2: storedSignal.tp2 ?? undefined,
-          externalId: storedSignal.externalId ?? undefined,
-          rawPayload: storedSignal.rawPayload ?? undefined,
-        },
-      },
-      {
-        jobId: dedupKey,
-        removeOnComplete: true,
-        removeOnFail: { count: 50 },
-      },
+    await this.notificationOrchestrator.handleSignalCreated(storedSignal.id);
+    this.logger.debug(
+      `Signal orchestrator triggered (${storedSignal.instrument} ${storedSignal.interval} ${storedSignal.side})`,
     );
   }
 

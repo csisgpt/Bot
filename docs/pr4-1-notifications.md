@@ -1,0 +1,54 @@
+# PR4.1: ارکستریتور اعلانها
+
+## هدف
+این ارکستریتور، ارسال اعلانهای سیگنال، خبر و آربیتراژ را در یک مسیر واحد تجمیع میکند تا:
+- تحویل تکراری رخ ندهد (idempotent delivery)
+- سیاستهای هر چت اعمال شود (مود، نرخ، سکوت، واچلیست)
+- ثبتهای قابل پیگیری در دیتابیس داشته باشیم (NotificationDelivery)
+
+## سیاستها و مودها
+- **مودها:** NORMAL / QUIET / AGGRESSIVE
+  - QUIET: محدودیت بیشتر و حداقل اعتماد بالاتر
+  - AGGRESSIVE: محدودیت کمتر و حداقل اعتماد پایینتر
+- **واچلیست:** اگر خالی نباشد، فقط نمادهای موجود ارسال میشوند.
+- **فیلتر ارائهدهنده:** اگر لیست خالی نباشد، فقط همان ارائهدهندهها مجازند.
+- **ساعات سکوت:**
+  - سیگنال فقط با اعتماد ≥85
+  - خبر فقط اگر مهم/اعلان باشد
+  - آربیتراژ فقط اگر سود خالص ≥0.5٪
+- **محدودیت نرخ:** حداکثر اعلان در هر ساعت برای هر چت.
+- **کولداون:** جلوگیری از تکرار پشتسرهم برای هر نوع اعلان.
+
+## کلیدهای محیطی
+```env
+NOTIFICATION_ORCHESTRATOR_ENABLED=true
+NOTIF_MODE_DEFAULT=NORMAL
+NOTIF_MAX_PER_HOUR_DEFAULT=12
+NOTIF_QUIET_HOURS_DEFAULT_ENABLED=true
+NOTIF_QUIET_HOURS_DEFAULT_START=23:00
+NOTIF_QUIET_HOURS_DEFAULT_END=08:00
+NOTIF_COOLDOWN_SIGNALS_DEFAULT=600
+NOTIF_COOLDOWN_NEWS_DEFAULT=1800
+NOTIF_COOLDOWN_ARB_DEFAULT=300
+NOTIF_MIN_CONFIDENCE_DEFAULT=60
+NOTIF_DIGEST_ENABLED_DEFAULT=false
+NOTIF_DIGEST_TIMES_DEFAULT=09:00,21:00
+```
+
+## نحوه تست محلی
+1. مایگریشنها را اعمال کنید:
+   ```bash
+   pnpm prisma migrate deploy
+   ```
+2. Worker را اجرا کنید و سپس:
+   - سیگنال/خبر/آربیتراژ جدید بسازید
+   - خروجی /health/notifications را بررسی کنید
+3. تستهای واحد:
+   ```bash
+   pnpm test -- notification-policy
+   ```
+
+## نکتههای پیادهسازی
+- جدول `NotificationDelivery` منبع حقیقت تحویل است.
+- ارسالها همیشه از مسیر ارکستریتور عبور میکنند.
+- پیامها با HTML امن ساخته میشوند تا خطای «can't parse entities» رخ ندهد.

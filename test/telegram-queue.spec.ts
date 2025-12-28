@@ -7,9 +7,15 @@ describe('telegram text job schema', () => {
       chatId: '12345',
       text: 'hello',
       parseMode: 'HTML',
+      notificationDeliveryId: 'delivery-1',
     });
 
-    expect(payload).toEqual({ chatId: '12345', text: 'hello', parseMode: 'HTML' });
+    expect(payload).toEqual({
+      chatId: '12345',
+      text: 'hello',
+      parseMode: 'HTML',
+      notificationDeliveryId: 'delivery-1',
+    });
   });
 
   it('rejects empty text payloads', () => {

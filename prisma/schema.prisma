@@ -48,10 +48,19 @@ model ChatConfig {
   assetsEnabled     String[] @default([])
   timeframes        String[] @default([])
   watchlist         String[] @default([])
-  minConfidence     Int      @default(70)
-  quietHoursEnabled Boolean  @default(false)
-  quietHoursStart   String?
-  quietHoursEnd     String?
+  mode              String   @default("NORMAL")
+  enabledProviders  String[] @default([])
+  enabledFeatures   Json     @default("{\"signals\":true,\"news\":true,\"arbitrage\":true}")
+  minConfidence     Int      @default(60)
+  quietHoursEnabled Boolean  @default(true)
+  quietHoursStart   String   @default("23:00")
+  quietHoursEnd     String   @default("08:00")
+  maxNotifsPerHour  Int      @default(12)
+  cooldownSignalsSec Int     @default(600)
+  cooldownNewsSec   Int      @default(1800)
+  cooldownArbSec    Int      @default(300)
+  digestEnabled     Boolean  @default(false)
+  digestTimes       String[] @default([])
   sendToGroup       Boolean  @default(true)
   sendToChannel     Boolean  @default(false)
   mutedUntil        DateTime?
@@ -200,6 +209,21 @@ model SignalDelivery {
 
   @@unique([signalId, chatId])
   @@index([chatId, deliveredAt])
+}
+
+model NotificationDelivery {
+  id                String   @id @default(uuid())
+  entityType        String
+  entityId          String
+  chatId            String
+  status            String   @default("SENT")
+  reason            String?
+  providerMessageId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([entityType, entityId, chatId])
+  @@index([chatId, createdAt])
 }
 
 enum SignalSource {

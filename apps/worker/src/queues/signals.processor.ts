@@ -1,7 +1,7 @@
-import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Job, Queue } from 'bullmq';
+import { Job } from 'bullmq';
 import { PrismaService, SIGNALS_QUEUE_CONCURRENCY, SIGNALS_QUEUE_NAME } from '@libs/core';
 import {
   FeedRegistry,
@@ -12,7 +12,7 @@ import {
   parseTradingViewPayload,
 } from '@libs/signals';
 import { TelegramService, telegramTextJobSchema } from '@libs/telegram';
-import { ChatConfig } from '@prisma/client';
+import { NotificationOrchestratorService } from '../notifications/notification-orchestrator.service';
 
 interface TradingViewIngestJob {
   receivedAt: string;
@@ -33,7 +33,7 @@ export class SignalsProcessor extends WorkerHost {
     private readonly feedRegistry: FeedRegistry,
     private readonly telegramService: TelegramService,
     private readonly prismaService: PrismaService,
-    @InjectQueue(SIGNALS_QUEUE_NAME) private readonly signalsQueue: Queue,
+    private readonly notificationOrchestrator: NotificationOrchestratorService,
   ) {
     super();
   }
@@ -99,7 +99,7 @@ export class SignalsProcessor extends WorkerHost {
       }
 
       const storedSignal = await this.signalsService.storeSignal(signal);
-      await this.dispatchSignalToChats(storedSignal);
+      await this.notificationOrchestrator.handleSignalCreated(storedSignal.id);
 
       // ✅ اگر price نیومده بود، تلاش کن سریع fallback بگیری (ولی جلوی ارسال رو نگیر)
       if (signal.price === null) {
@@ -128,10 +128,18 @@ export class SignalsProcessor extends WorkerHost {
     }
   }
 
-  private async handleSendTelegramSignal(job: Job<{ chatId: string; signal: Signal }>): Promise<void> {
+  private async handleSendTelegramSignal(
+    job: Job<{ chatId: string; signal: Signal; notificationDeliveryId?: string }>,
+  ): Promise<void> {
     try {
-      const { chatId, signal } = job.data;
+      const { chatId, signal, notificationDeliveryId } = job.data;
       const messageId = await this.telegramService.sendSignalToChat(signal, chatId);
+      if (notificationDeliveryId) {
+        await this.prismaService.notificationDelivery.update({
+          where: { id: notificationDeliveryId },
+          data: { status: 'SENT', providerMessageId: String(messageId) },
+        });
+      }
       await this.prismaService.signalDeliveryLog.create({
         data: {
           signalId: signal.id ?? 'unknown',
@@ -146,6 +154,12 @@ export class SignalsProcessor extends WorkerHost {
       this.logger.error(
         `sendTelegramSignal failed job ${job.id ?? 'unknown'} (${data.signal.instrument} ${data.signal.interval} ${data.signal.side}): ${message}`,
       );
+      if (data.notificationDeliveryId) {
+        await this.prismaService.notificationDelivery.update({
+          where: { id: data.notificationDeliveryId },
+          data: { status: 'FAILED', reason: message },
+        });
+      }
       await this.prismaService.signalDeliveryLog.create({
         data: {
           signalId: data.signal.id ?? 'unknown',
@@ -166,9 +180,21 @@ export class SignalsProcessor extends WorkerHost {
     const payload = telegramTextJobSchema.parse(job.data);
     try {
       await this.telegramService.sendMessage(String(payload.chatId), payload.text, payload.parseMode);
+      if (payload.notificationDeliveryId) {
+        await this.prismaService.notificationDelivery.update({
+          where: { id: payload.notificationDeliveryId },
+          data: { status: 'SENT' },
+        });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       this.logger.error(`sendTelegramText failed job ${job.id ?? 'unknown'}: ${message}`);
+      if (payload.notificationDeliveryId) {
+        await this.prismaService.notificationDelivery.update({
+          where: { id: payload.notificationDeliveryId },
+          data: { status: 'FAILED', reason: message },
+        });
+      }
       throw err;
     }
   }
@@ -221,109 +247,6 @@ export class SignalsProcessor extends WorkerHost {
     return undefined;
   }
 
-  private async dispatchSignalToChats(signal: Signal): Promise<void> {
-    const chatConfigs = await this.prismaService.chatConfig.findMany({
-      where: { isEnabled: true },
-    });
-
-    const now = new Date();
-    const fallbackChannelId = this.configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '');
-    const fallbackGroupId = this.configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '');
-
-    const destinations = new Set<string>();
-    if (chatConfigs.length === 0) {
-      if (fallbackChannelId) destinations.add(fallbackChannelId);
-      if (fallbackGroupId) destinations.add(fallbackGroupId);
-    } else {
-      for (const chatConfig of chatConfigs) {
-        if (!this.isSignalAllowedForChat(signal, chatConfig, now)) {
-          continue;
-        }
-
-        if (chatConfig.chatType === 'group') {
-          if (chatConfig.sendToGroup) destinations.add(chatConfig.chatId);
-          if (chatConfig.sendToChannel && fallbackChannelId) destinations.add(fallbackChannelId);
-          continue;
-        }
-
-        if (chatConfig.chatType === 'channel') {
-          if (chatConfig.sendToChannel) destinations.add(chatConfig.chatId);
-          continue;
-        }
-
-        destinations.add(chatConfig.chatId);
-      }
-    }
-
-    if (destinations.size === 0) {
-      this.logger.warn(
-        `No Telegram destinations for TradingView signal ${signal.instrument} ${signal.interval}.`,
-      );
-      return;
-    }
-
-    const attempts = this.getNumber('SIGNALS_TELEGRAM_JOB_ATTEMPTS', 5);
-    const backoffDelayMs = this.getNumber('SIGNALS_TELEGRAM_JOB_BACKOFF_DELAY_MS', 2000);
-    const priority = this.getNumber('SIGNALS_TELEGRAM_JOB_PRIORITY', 1);
-
-    for (const chatId of destinations) {
-      await this.signalsQueue.add('sendTelegramSignal', { chatId, signal }, {
-        priority,
-        attempts,
-        backoff: { type: 'exponential', delay: backoffDelayMs },
-        removeOnComplete: true,
-        removeOnFail: { count: 200 },
-      });
-    }
-  }
-
-  private isSignalAllowedForChat(signal: Signal, chatConfig: ChatConfig, now: Date): boolean {
-    const assetsEnabled = (chatConfig.assetsEnabled ?? []).map((asset) => asset.toUpperCase());
-    if (assetsEnabled.length > 0 && !assetsEnabled.includes(signal.assetType.toUpperCase())) {
-      return false;
-    }
-
-    const timeframes = (chatConfig.timeframes ?? []).map((frame) => frame.toLowerCase());
-    if (timeframes.length > 0 && !timeframes.includes(signal.interval.toLowerCase())) {
-      return false;
-    }
-
-    const watchlist = (chatConfig.watchlist ?? []).map((item) => item.toUpperCase());
-    if (watchlist.length > 0 && !watchlist.includes(signal.instrument.toUpperCase())) {
-      return false;
-    }
-
-    if (signal.confidence < chatConfig.minConfidence) return false;
-
-    if (chatConfig.mutedUntil && now < chatConfig.mutedUntil) {
-      if (chatConfig.mutedInstruments.length === 0) return false;
-      if (chatConfig.mutedInstruments.includes(signal.instrument)) return false;
-    }
-
-    if (chatConfig.quietHoursEnabled) {
-      const inQuiet = this.isInQuietHours(now, chatConfig.quietHoursStart, chatConfig.quietHoursEnd);
-      if (inQuiet) return false;
-    }
-
-    return true;
-  }
-
-  private isInQuietHours(now: Date, start?: string | null, end?: string | null): boolean {
-    if (!start || !end) return false;
-    const [startH, startM] = start.split(':').map(Number);
-    const [endH, endM] = end.split(':').map(Number);
-    if ([startH, startM, endH, endM].some((v) => Number.isNaN(v))) return false;
-
-    const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-
-    if (startMinutes === endMinutes) return false;
-    if (startMinutes < endMinutes) {
-      return minutes >= startMinutes && minutes < endMinutes;
-    }
-    return minutes >= startMinutes || minutes < endMinutes;
-  }
 
   private getNumber(key: string, fallback: number): number {
     const raw = this.configService.get<string | number | undefined>(key);

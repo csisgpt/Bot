@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
-import { CoreModule, SIGNALS_QUEUE_NAME } from '@libs/core';
+import { CoreModule } from '@libs/core';
 import { MarketDataModule } from '../market-data/market-data.module';
 import { SignalsEngineService } from './signals-engine.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [CoreModule, MarketDataModule, BullModule.registerQueue({ name: SIGNALS_QUEUE_NAME })],
+  imports: [CoreModule, MarketDataModule, NotificationsModule],
   providers: [SignalsEngineService],
 })
 export class SignalsEngineModule {}
