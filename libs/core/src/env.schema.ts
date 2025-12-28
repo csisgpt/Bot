@@ -113,6 +113,14 @@ const envObject = z
     CANDLE_AGGREGATE_CONCURRENCY: toInt(5).pipe(z.number().int().min(1).max(50)),
     AGG_TIMEFRAMES: csv(["5m", "15m"]).default(["5m", "15m"]),
 
+    SIGNAL_ENGINE_ENABLED: toBool(true).default(true),
+    SIGNAL_ENGINE_INTERVAL_SECONDS: toInt(30).pipe(z.number().int().min(5).max(3600)),
+    DEFAULT_SIGNAL_TIMEFRAMES: csv(["5m", "15m"]).default(["5m", "15m"]),
+    MIN_CANDLES: toInt(50).pipe(z.number().int().min(2).max(2000)),
+    SIGNAL_COOLDOWN_SECONDS: toInt(600).pipe(z.number().int().min(0).max(24 * 3600)),
+    SIGNAL_ENGINE_CONCURRENCY: toInt(5).pipe(z.number().int().min(1).max(50)),
+    SIGNAL_STRATEGY_NAME: z.string().trim().default("MVP_V1"),
+
     BINANCE_BASE_URL: z.string().trim().default("https://data-api.binance.vision"),
     BINANCE_INTERVAL: z.string().trim().default("15m"),
     BINANCE_KLINES_LIMIT: toInt(200).pipe(z.number().int().min(1).max(1000)),

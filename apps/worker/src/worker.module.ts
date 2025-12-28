@@ -14,6 +14,7 @@ import { SignalsProcessor } from './queues/signals.processor';
 import { TradingViewEmailIngestService } from './tradingview/tradingview-email.service';
 import { AlertsCron } from './cron/alerts.cron';
 import { DigestCron } from './cron/digest.cron';
+import { SignalsEngineModule } from './signals-engine/signals-engine.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { DigestCron } from './cron/digest.cron';
     SignalsModule,
     TelegramModule,
     MarketDataModule,
+    SignalsEngineModule,
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [CoreModule],
