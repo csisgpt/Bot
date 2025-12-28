@@ -124,6 +124,60 @@ model Candle {
   @@index([instrument, timeframe, time])
 }
 
+model MarketCandle {
+  id              String   @id @default(uuid())
+  provider        String
+  canonicalSymbol String
+  timeframe       String
+  openTime        DateTime
+  open            Float
+  high            Float
+  low             Float
+  close           Float
+  volume          Float
+  isFinal         Boolean  @default(true)
+  rawPayload      Json?
+  createdAt       DateTime @default(now())
+
+  @@unique([provider, canonicalSymbol, timeframe, openTime])
+  @@index([canonicalSymbol, timeframe, openTime])
+}
+
+model News {
+  id         String   @id @default(uuid())
+  provider   String
+  ts         DateTime
+  title      String
+  url        String
+  category   String
+  tags       String[]
+  hash       String   @unique
+  rawPayload Json?
+  createdAt  DateTime @default(now())
+
+  @@index([provider, ts])
+}
+
+model ArbOpportunity {
+  id              String   @id @default(uuid())
+  canonicalSymbol String
+  ts              DateTime
+  kind            String
+  buyExchange     String
+  sellExchange    String
+  buyPrice        Float
+  sellPrice       Float
+  spreadAbs       Float
+  spreadPct       Float
+  netPct          Float?
+  confidence      Int
+  reason          String
+  dedupKey        String   @unique
+  createdAt       DateTime @default(now())
+
+  @@index([canonicalSymbol, ts])
+}
+
 model SignalProcessingState {
   id                      String   @id @default(uuid())
   source                  String

@@ -61,6 +61,8 @@ const envObject = z
 
     QUEUE_SIGNALS_NAME: z.string().trim().default("signals"),
     QUEUE_CONCURRENCY: toInt(5).pipe(z.number().int().min(1).max(200)),
+    QUEUE_MARKET_DATA_NAME: z.string().trim().default("market-data"),
+    QUEUE_NEWS_NAME: z.string().trim().default("news"),
 
     SIGNALS_TELEGRAM_JOB_ATTEMPTS: toInt(5).pipe(z.number().int().min(1).max(50)),
     SIGNALS_TELEGRAM_JOB_BACKOFF_DELAY_MS: toInt(3000).pipe(z.number().int().min(0).max(60_000)),
@@ -94,6 +96,11 @@ const envObject = z
     BINANCE_SYMBOLS: z.string().trim().optional(),
     DEFAULT_TIMEFRAMES: csv(["5m", "15m"]).default(["5m", "15m"]),
     MONITORING_ENABLED: toBool(true).default(true),
+    PROVIDERS_ENABLED: z.string().trim().default("binance,bybit,okx"),
+    MARKET_DATA_INGEST_ENABLED: toBool(true).default(true),
+    MARKET_DATA_TIMEFRAMES: csv(["1m"]).default(["1m"]),
+    MARKET_DATA_TICKER_TTL_SECONDS: toInt(120).pipe(z.number().int().min(5).max(3600)),
+    LEGACY_CANDLE_COMPAT_ENABLED: toBool(true).default(true),
 
     PRICE_PROVIDER_GOLD: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
     PRICE_PROVIDER_CRYPTO: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
@@ -126,6 +133,8 @@ const envObject = z
     BINANCE_INTERVAL: z.string().trim().default("15m"),
     BINANCE_KLINES_LIMIT: toInt(200).pipe(z.number().int().min(1).max(1000)),
     BINANCE_REQUEST_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
+    BINANCE_WS_URL: z.string().trim().default("wss://stream.binance.com:9443/stream"),
+    BINANCE_WS_MINI_TICKER: toBool(false).default(false),
 
     STRATEGIES_ENABLED: csv(["ema_rsi", "rsi_threshold", "breakout", "macd"]).default([
       "ema_rsi",
@@ -183,6 +192,48 @@ const envObject = z
     TRADINGVIEW_EMAIL_FOLDER: z.string().trim().default("INBOX"),
     TRADINGVIEW_EMAIL_POLL_SECONDS: toInt(30).pipe(z.number().int().min(5).max(3600)),
 
+    BYBIT_WS_URL: z.string().trim().default("wss://stream.bybit.com/v5/public/spot"),
+    BYBIT_REST_URL: z.string().trim().default("https://api.bybit.com"),
+    BYBIT_REST_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
+    BYBIT_REST_FALLBACK_INTERVAL_SECONDS: toInt(60).pipe(z.number().int().min(10).max(3600)),
+
+    OKX_REST_URL: z.string().trim().default("https://www.okx.com"),
+    OKX_REST_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
+    OKX_REST_TICKER_INTERVAL_SECONDS: toInt(10).pipe(z.number().int().min(1).max(600)),
+    OKX_REST_CANDLE_INTERVAL_SECONDS: toInt(60).pipe(z.number().int().min(10).max(3600)),
+    OKX_POLL_INTERVAL_MS: toInt(10000).pipe(z.number().int().min(1000).max(60_000)),
+    OKX_REST_CONCURRENCY: toInt(4).pipe(z.number().int().min(1).max(20)),
+    OKX_WS_URL: z.string().trim().optional(),
+    OKX_WS_ENABLED: toBool(false).default(false),
+
+    KCEX_ENABLE: toBool(false).default(false),
+    KCEX_REST_URL: z.string().trim().optional(),
+    KCEX_WS_URL: z.string().trim().optional(),
+
+    ARB_ENABLED: toBool(true).default(true),
+    ARB_SCAN_INTERVAL_SECONDS: toInt(5).pipe(z.number().int().min(1).max(3600)),
+    ARB_STALE_MS: toInt(15000).pipe(z.number().int().min(1000).max(300_000)),
+    ARB_MIN_SPREAD_PCT: toFloat(0.2).pipe(z.number().min(0).max(100)),
+    ARB_MIN_NET_PCT: toFloat(0.05).pipe(z.number().min(-100).max(100)),
+    ARB_COOLDOWN_SECONDS: toInt(60).pipe(z.number().int().min(0).max(3600)),
+    ARB_DEDUPE_TTL_SECONDS: toInt(300).pipe(z.number().int().min(10).max(3600)),
+    ARB_FUNDING_ENABLED: toBool(false).default(false),
+    ARB_TRIANGULAR_ENABLED: toBool(false).default(false),
+    ARB_DEPTH_ENABLED: toBool(false).default(false),
+    PROVIDER_TAKER_FEE_BPS_BINANCE: toFloat(10).pipe(z.number().min(0).max(1000)),
+    PROVIDER_TAKER_FEE_BPS_BYBIT: toFloat(10).pipe(z.number().min(0).max(1000)),
+    PROVIDER_TAKER_FEE_BPS_OKX: toFloat(10).pipe(z.number().min(0).max(1000)),
+    PROVIDER_TAKER_FEE_BPS_KCEX: toFloat(10).pipe(z.number().min(0).max(1000)),
+
+    NEWS_ENABLED: toBool(true).default(true),
+    NEWS_FETCH_INTERVAL_MINUTES: toInt(5).pipe(z.number().int().min(1).max(1440)),
+    NEWS_HTTP_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
+    NEWS_RETRY_ATTEMPTS: toInt(3).pipe(z.number().int().min(1).max(10)),
+    NEWS_RETRY_BASE_DELAY_MS: toInt(500).pipe(z.number().int().min(100).max(10_000)),
+    NEWS_BINANCE_URL: z.string().trim().default("https://www.binance.com/en/support/announcement"),
+    NEWS_BYBIT_URL: z.string().trim().default("https://www.bybit.com/en/announcement-info"),
+    NEWS_OKX_URL: z.string().trim().default("https://www.okx.com/support/hc/en-us/categories/360000030652"),
+
     HTTP_PROXY: z.string().trim().optional(),
     HTTPS_PROXY: z.string().trim().optional(),
     ALL_PROXY: z.string().trim().optional(),
@@ -200,7 +251,9 @@ const envObject = z
   })
   .passthrough();
 
-export const envSchema = envObject.superRefine((env, ctx) => {
+export const envSchema = envObject;
+
+export const envSchemaWithRefinements = envObject.superRefine((env, ctx) => {
   if (env.TRADINGVIEW_WEBHOOK_ENABLED && !env.TRADINGVIEW_WEBHOOK_SECRET) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -236,5 +289,5 @@ export const envSchema = envObject.superRefine((env, ctx) => {
 });
 
 // برای اینکه هم core.module قدیمی نشکنه هم اسم جدید داشته باشی:
-export const EnvSchema = envSchema;
-export type Env = z.infer<typeof envSchema>;
+export const EnvSchema = envSchemaWithRefinements;
+export type Env = z.infer<typeof envSchemaWithRefinements>;

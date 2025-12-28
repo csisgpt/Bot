@@ -15,6 +15,10 @@ import { TradingViewEmailIngestService } from './tradingview/tradingview-email.s
 import { AlertsCron } from './cron/alerts.cron';
 import { DigestCron } from './cron/digest.cron';
 import { SignalsEngineModule } from './signals-engine/signals-engine.module';
+import { MarketDataV3Module } from './market-data-v3/market-data-v3.module';
+import { ArbitrageModule } from './arbitrage/arbitrage.module';
+import { NewsModule } from './news/news.module';
+import { MarketDataProcessor } from './queues/market-data.processor';
 
 @Module({
   imports: [
@@ -24,6 +28,9 @@ import { SignalsEngineModule } from './signals-engine/signals-engine.module';
     TelegramModule,
     MarketDataModule,
     SignalsEngineModule,
+    MarketDataV3Module,
+    ArbitrageModule,
+    NewsModule,
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [CoreModule],
@@ -41,6 +48,7 @@ import { SignalsEngineModule } from './signals-engine/signals-engine.module';
     AlertsCron,
     DigestCron,
     SignalsProcessor,
+    MarketDataProcessor,
     TradingViewEmailIngestService,
   ],
 })
