@@ -46,6 +46,7 @@ const envObject = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("production"),
     APP_NAME: z.string().trim().default("crypto-signals-bot"),
     TZ: z.string().trim().default("UTC"),
+    APP_TIMEZONE: z.string().trim().default("Europe/Berlin"),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
     PORT: toInt(3000).pipe(z.number().int().min(1).max(65535)),
@@ -76,6 +77,8 @@ const envObject = z
     NOTIF_MIN_CONFIDENCE_DEFAULT: toInt(60).pipe(z.number().int().min(0).max(100)),
     NOTIF_DIGEST_ENABLED_DEFAULT: toBool(false).default(false),
     NOTIF_DIGEST_TIMES_DEFAULT: csv([]).default([]),
+
+    LEGACY_SIGNAL_DELIVERY_LOG_ENABLED: toBool(false).default(false),
 
     SIGNALS_TELEGRAM_JOB_ATTEMPTS: toInt(5).pipe(z.number().int().min(1).max(50)),
     SIGNALS_TELEGRAM_JOB_BACKOFF_DELAY_MS: toInt(3000).pipe(z.number().int().min(0).max(60_000)),

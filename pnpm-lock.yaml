@@ -47,6 +47,9 @@ importers:
       ioredis:
         specifier: ^5.4.1
         version: 5.8.2
+      luxon:
+        specifier: ^3.7.2
+        version: 3.7.2
       mailparser:
         specifier: ^3.7.1
         version: 3.9.1

@@ -1,4 +1,5 @@
-import { getModePreset } from './mode-presets';
+import { DateTime } from 'luxon';
+import { getModePreset, normalizeMode } from './mode-presets';
 
 export type NotificationEntityType = 'SIGNAL' | 'NEWS' | 'ARB';
 
@@ -59,6 +60,7 @@ export interface PolicyInput {
   entityType: NotificationEntityType;
   preferences: ChatPreferences;
   now: Date;
+  timeZone: string;
   signal?: SignalSnapshot;
   news?: NewsSnapshot;
   arb?: ArbSnapshot;
@@ -66,8 +68,10 @@ export interface PolicyInput {
   cooldownHit: boolean;
 }
 
+export type PolicyAction = 'ALLOW' | 'SKIP' | 'DIGEST';
+
 export interface PolicyDecision {
-  allowed: boolean;
+  action: PolicyAction;
   reason?: string;
 }
 
@@ -77,12 +81,21 @@ const normalizeList = (items: string[] = []): string[] =>
 const normalizeProviders = (items: string[] = []): string[] =>
   items.map((item) => item.trim().toLowerCase()).filter(Boolean);
 
-export const isInQuietHours = (now: Date, start: string, end: string): boolean => {
+const toLocalMinutes = (now: Date, timeZone: string): number | null => {
+  const zoned = DateTime.fromJSDate(now, { zone: timeZone });
+  const safe = zoned.isValid ? zoned : DateTime.fromJSDate(now, { zone: 'UTC' });
+  if (!safe.isValid) return null;
+  return safe.hour * 60 + safe.minute;
+};
+
+export const isInQuietHours = (now: Date, start: string, end: string, timeZone: string): boolean => {
   const [startH, startM] = start.split(':').map(Number);
   const [endH, endM] = end.split(':').map(Number);
   if ([startH, startM, endH, endM].some((v) => Number.isNaN(v))) return false;
 
-  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const minutes = toLocalMinutes(now, timeZone);
+  if (minutes === null) return false;
+
   const startMinutes = startH * 60 + startM;
   const endMinutes = endH * 60 + endM;
 
@@ -112,63 +125,85 @@ const matchesProviders = (enabledProviders: string[], provider: string): boolean
   return enabledProviders.includes(provider.toLowerCase());
 };
 
-export const evaluatePolicy = (input: PolicyInput): PolicyDecision => {
-  const { entityType, preferences, now, signal, news, arb, rateLimitHit, cooldownHit } = input;
-  const features = preferences.enabledFeatures ?? {};
+const isHighPriority = (
+  entityType: NotificationEntityType,
+  signal?: SignalSnapshot,
+  news?: NewsSnapshot,
+  arb?: ArbSnapshot,
+): boolean => {
+  if (entityType === 'SIGNAL' && signal) {
+    return signal.confidence >= 85;
+  }
+  if (entityType === 'NEWS' && news) {
+    return isHighImpactNews(news);
+  }
+  if (entityType === 'ARB' && arb) {
+    return (arb.netPct ?? 0) >= 0.5;
+  }
+  return false;
+};
 
+export const evaluatePolicy = (input: PolicyInput): PolicyDecision => {
+  const { entityType, preferences, now, timeZone, signal, news, arb, rateLimitHit, cooldownHit } = input;
+  const features = preferences.enabledFeatures ?? {};
   const modePreset = getModePreset(preferences.mode);
+
   const effectiveMaxPerHour = modePreset.maxNotifsPerHour ?? preferences.maxNotifsPerHour;
   const effectiveMinConfidence = modePreset.minConfidence ?? preferences.minConfidence;
 
-  if (preferences.digestEnabled) {
-    return { allowed: false, reason: 'digest_enabled' };
+  const highPriority = isHighPriority(entityType, signal, news, arb);
+  if (preferences.digestEnabled && !highPriority) {
+    return { action: 'DIGEST', reason: 'digest_buffered' };
   }
 
   if (entityType === 'SIGNAL' && features.signals === false) {
-    return { allowed: false, reason: 'feature_disabled' };
+    return { action: 'SKIP', reason: 'feature_disabled' };
   }
   if (entityType === 'NEWS' && features.news === false) {
-    return { allowed: false, reason: 'feature_disabled' };
+    return { action: 'SKIP', reason: 'feature_disabled' };
   }
   if (entityType === 'ARB' && features.arbitrage === false) {
-    return { allowed: false, reason: 'feature_disabled' };
+    return { action: 'SKIP', reason: 'feature_disabled' };
   }
 
   if (entityType === 'SIGNAL' && signal) {
     const assetsEnabled = normalizeList(preferences.assetsEnabled ?? []);
     if (assetsEnabled.length > 0 && !assetsEnabled.includes(signal.assetType.toUpperCase())) {
-      return { allowed: false, reason: 'asset_filtered' };
+      return { action: 'SKIP', reason: 'asset_filtered' };
     }
 
     const timeframes = (preferences.timeframes ?? []).map((frame) => frame.toLowerCase());
     if (timeframes.length > 0 && !timeframes.includes(signal.interval.toLowerCase())) {
-      return { allowed: false, reason: 'timeframe_filtered' };
+      return { action: 'SKIP', reason: 'timeframe_filtered' };
     }
 
     const watchlist = normalizeList(preferences.watchlist ?? []);
     if (!matchesWatchlist(watchlist, signal.instrument)) {
-      return { allowed: false, reason: 'watchlist_filtered' };
+      return { action: 'SKIP', reason: 'watchlist_filtered' };
     }
 
     if (signal.confidence < effectiveMinConfidence) {
-      return { allowed: false, reason: 'min_confidence' };
+      return { action: 'SKIP', reason: 'min_confidence' };
     }
 
     if (preferences.mutedUntil && now < preferences.mutedUntil) {
       const muted = preferences.mutedInstruments ?? [];
       if (muted.length === 0 || muted.includes(signal.instrument)) {
-        return { allowed: false, reason: 'muted' };
+        return { action: 'SKIP', reason: 'muted' };
       }
     }
 
     const providers = normalizeProviders(preferences.enabledProviders ?? []);
     if (!matchesProviders(providers, signal.source ?? '')) {
-      return { allowed: false, reason: 'provider_filtered' };
+      return { action: 'SKIP', reason: 'provider_filtered' };
     }
 
-    if (preferences.quietHoursEnabled && isInQuietHours(now, preferences.quietHoursStart, preferences.quietHoursEnd)) {
+    if (
+      preferences.quietHoursEnabled &&
+      isInQuietHours(now, preferences.quietHoursStart, preferences.quietHoursEnd, timeZone)
+    ) {
       if (signal.confidence < 85) {
-        return { allowed: false, reason: 'quiet_hours' };
+        return { action: 'SKIP', reason: 'quiet_hours' };
       }
     }
   }
@@ -177,17 +212,20 @@ export const evaluatePolicy = (input: PolicyInput): PolicyDecision => {
     const watchlist = normalizeList(preferences.watchlist ?? []);
     const haystack = `${news.title} ${news.category} ${news.tags.join(' ')}`;
     if (!matchesWatchlist(watchlist, haystack)) {
-      return { allowed: false, reason: 'watchlist_filtered' };
+      return { action: 'SKIP', reason: 'watchlist_filtered' };
     }
 
     const providers = normalizeProviders(preferences.enabledProviders ?? []);
     if (!matchesProviders(providers, news.provider)) {
-      return { allowed: false, reason: 'provider_filtered' };
+      return { action: 'SKIP', reason: 'provider_filtered' };
     }
 
-    if (preferences.quietHoursEnabled && isInQuietHours(now, preferences.quietHoursStart, preferences.quietHoursEnd)) {
+    if (
+      preferences.quietHoursEnabled &&
+      isInQuietHours(now, preferences.quietHoursStart, preferences.quietHoursEnd, timeZone)
+    ) {
       if (!isHighImpactNews(news)) {
-        return { allowed: false, reason: 'quiet_hours' };
+        return { action: 'SKIP', reason: 'quiet_hours' };
       }
     }
   }
@@ -195,7 +233,7 @@ export const evaluatePolicy = (input: PolicyInput): PolicyDecision => {
   if (entityType === 'ARB' && arb) {
     const watchlist = normalizeList(preferences.watchlist ?? []);
     if (!matchesWatchlist(watchlist, arb.canonicalSymbol)) {
-      return { allowed: false, reason: 'watchlist_filtered' };
+      return { action: 'SKIP', reason: 'watchlist_filtered' };
     }
 
     const providers = normalizeProviders(preferences.enabledProviders ?? []);
@@ -204,32 +242,37 @@ export const evaluatePolicy = (input: PolicyInput): PolicyDecision => {
       providers.includes(arb.buyExchange.toLowerCase()) ||
       providers.includes(arb.sellExchange.toLowerCase());
     if (!providerAllowed) {
-      return { allowed: false, reason: 'provider_filtered' };
+      return { action: 'SKIP', reason: 'provider_filtered' };
     }
 
     if (arb.confidence < effectiveMinConfidence) {
-      return { allowed: false, reason: 'min_confidence' };
+      return { action: 'SKIP', reason: 'min_confidence' };
     }
 
-    if (preferences.quietHoursEnabled && isInQuietHours(now, preferences.quietHoursStart, preferences.quietHoursEnd)) {
+    if (
+      preferences.quietHoursEnabled &&
+      isInQuietHours(now, preferences.quietHoursStart, preferences.quietHoursEnd, timeZone)
+    ) {
       const netPct = arb.netPct ?? 0;
       if (netPct < 0.5) {
-        return { allowed: false, reason: 'quiet_hours' };
+        return { action: 'SKIP', reason: 'quiet_hours' };
       }
     }
   }
 
   if (rateLimitHit) {
-    return { allowed: false, reason: 'rate_limit' };
+    return { action: 'SKIP', reason: 'rate_limit' };
   }
 
   if (cooldownHit) {
-    return { allowed: false, reason: 'cooldown' };
+    return { action: 'SKIP', reason: 'cooldown' };
   }
 
   if (effectiveMaxPerHour <= 0) {
-    return { allowed: false, reason: 'max_per_hour_zero' };
+    return { action: 'SKIP', reason: 'max_per_hour_zero' };
   }
 
-  return { allowed: true };
+  return { action: 'ALLOW' };
 };
+
+export const resolveEffectiveMode = (mode?: string | null): string => normalizeMode(mode);

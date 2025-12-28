@@ -3,150 +3,187 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
-import { PrismaService, SIGNALS_QUEUE_NAME } from '@libs/core';
+import { PrismaService, RedisService, SIGNALS_QUEUE_NAME } from '@libs/core';
 import { ChatConfig } from '@prisma/client';
+import { DateTime } from 'luxon';
+
+interface DigestItemRef {
+  entityType: 'SIGNAL' | 'NEWS' | 'ARB';
+  entityId: string;
+  createdAt: string;
+}
 
 @Injectable()
 export class DigestCron {
   private readonly logger = new Logger(DigestCron.name);
-  private lastDigestDate: string | null = null;
 
   constructor(
     private readonly prismaService: PrismaService,
+    private readonly redisService: RedisService,
     private readonly configService: ConfigService,
     @InjectQueue(SIGNALS_QUEUE_NAME) private readonly signalsQueue: Queue,
   ) {}
 
   @Cron('*/1 * * * *')
   async handleCron(): Promise<void> {
-    const enabled = this.configService.get<boolean>('DIGEST_ENABLED', true);
-    if (!enabled) return;
-
     const now = new Date();
-    const timeString = this.configService.get<string>('DIGEST_TIME_UTC', '20:00');
-    const [targetHour, targetMinute] = timeString.split(':').map(Number);
-    if ([targetHour, targetMinute].some((v) => Number.isNaN(v))) {
-      this.logger.warn(`Invalid DIGEST_TIME_UTC value: ${timeString}`);
-      return;
-    }
-
-    if (now.getUTCHours() !== targetHour || now.getUTCMinutes() !== targetMinute) return;
-
-    const digestDate = now.toISOString().slice(0, 10);
-    if (this.lastDigestDate === digestDate) return;
-
-    const summary = await this.buildSummary(now);
-    if (!summary) return;
-
-    await this.dispatchDigest(summary, now);
-    this.lastDigestDate = digestDate;
-  }
-
-  private async buildSummary(now: Date): Promise<string | null> {
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-    const signals = await this.prismaService.signal.findMany({
-      where: {
-        createdAt: { gte: start, lte: now },
-      },
-    });
-
-    if (signals.length === 0) {
-      return '🧾 <b>گزارش روزانه</b>\nامروز سیگنالی ثبت نشد.';
-    }
-
-    let buyCount = 0;
-    let sellCount = 0;
-    const instrumentCounts = new Map<string, number>();
-    let totalConfidence = 0;
-
-    for (const signal of signals) {
-      if (signal.side === 'BUY') buyCount += 1;
-      if (signal.side === 'SELL') sellCount += 1;
-      instrumentCounts.set(signal.instrument, (instrumentCounts.get(signal.instrument) ?? 0) + 1);
-      totalConfidence += signal.confidence;
-    }
-
-    const topInstruments = Array.from(instrumentCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([instrument]) => instrument)
-      .join(', ');
-
-    const avgConfidence = totalConfidence / signals.length;
-
-    return [
-      '🧾 <b>گزارش روزانه</b>',
-      `سیگنال\u000cها: ${signals.length} (خرید ${buyCount} / فروش ${sellCount})`,
-      `نمادهای برتر: ${this.escapeHtml(topInstruments || 'نامشخص')}`,
-      `میانگین اعتماد: ${avgConfidence.toFixed(1)}%`,
-    ].join('\n');
-  }
-
-  private async dispatchDigest(message: string, now: Date): Promise<void> {
+    const timeZone = this.getTimeZone();
     const chatConfigs = await this.prismaService.chatConfig.findMany({
       where: { isEnabled: true },
     });
 
-    const postToGroup = this.configService.get<boolean>('DIGEST_POST_TO_GROUP', true);
-    const postToChannel = this.configService.get<boolean>('DIGEST_POST_TO_CHANNEL', false);
-    const fallbackGroupId = this.configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '');
-    const fallbackChannelId = this.configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '');
-
-    const destinations = new Set<string>();
-
     if (chatConfigs.length === 0) {
-      if (postToGroup && fallbackGroupId) destinations.add(fallbackGroupId);
-      if (postToChannel && fallbackChannelId) destinations.add(fallbackChannelId);
-    } else {
-      for (const chatConfig of chatConfigs) {
-        if (!this.isDigestAllowedForChat(chatConfig, now)) continue;
+      return;
+    }
 
-        if (chatConfig.chatType === 'group') {
-          if (postToGroup && chatConfig.sendToGroup) destinations.add(chatConfig.chatId);
-          if (postToChannel && chatConfig.sendToChannel && fallbackChannelId) {
-            destinations.add(fallbackChannelId);
-          }
+    for (const chatConfig of chatConfigs) {
+      const digestTimes = this.resolveDigestTimes(chatConfig);
+      if (digestTimes.length === 0) continue;
+
+      const targetTime = this.matchDigestTime(now, timeZone, digestTimes);
+      if (!targetTime) continue;
+
+      const sentKey = `digest:chat:${chatConfig.chatId}:${this.toDateKey(now, timeZone)}:sent:${targetTime}`;
+      const locked = await this.redisService.set(sentKey, '1', 'EX', 3600, 'NX');
+      if (!locked) continue;
+
+      await this.sendDigest(chatConfig, now, timeZone);
+    }
+  }
+
+  private async sendDigest(chatConfig: ChatConfig, now: Date, timeZone: string): Promise<void> {
+    const digestKey = this.getDigestKey(chatConfig.chatId, now, timeZone);
+    const rawItems = await this.redisService.lrange(digestKey, 0, -1);
+    if (!rawItems || rawItems.length === 0) {
+      return;
+    }
+
+    const refs = rawItems
+      .map((item) => {
+        try {
+          return JSON.parse(item) as DigestItemRef;
+        } catch {
+          return null;
         }
+      })
+      .filter((item): item is DigestItemRef => Boolean(item));
 
-        if (chatConfig.chatType === 'channel') {
-          if (postToChannel && chatConfig.sendToChannel) destinations.add(chatConfig.chatId);
+    if (refs.length === 0) {
+      return;
+    }
+
+    const summary = await this.buildSummary(refs);
+    if (!summary) {
+      return;
+    }
+
+    await this.signalsQueue.add(
+      'sendTelegramText',
+      { chatId: chatConfig.chatId, text: summary, parseMode: 'HTML' },
+      { removeOnComplete: true, removeOnFail: { count: 50 } },
+    );
+
+    await this.redisService.del(digestKey);
+  }
+
+  private async buildSummary(refs: DigestItemRef[]): Promise<string | null> {
+    const counts = refs.reduce(
+      (acc, item) => {
+        acc[item.entityType] = (acc[item.entityType] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    const topRefs = refs.slice(0, 5);
+    const lines = ['🧾 <b>خلاصه اعلانها</b>'];
+
+    lines.push(
+      `سیگنالها: ${counts.SIGNAL ?? 0} | اخبار: ${counts.NEWS ?? 0} | آربیتراژ: ${counts.ARB ?? 0}`,
+    );
+
+    const details: string[] = [];
+    for (const item of topRefs) {
+      if (item.entityType === 'SIGNAL') {
+        const signal = await this.prismaService.signal.findUnique({ where: { id: item.entityId } });
+        if (signal) {
+          details.push(
+            `• سیگنال ${this.escapeHtml(signal.instrument)} (${this.escapeHtml(signal.interval)})`,
+          );
+        }
+      }
+
+      if (item.entityType === 'NEWS') {
+        const news = await this.prismaService.news.findUnique({ where: { id: item.entityId } });
+        if (news) {
+          details.push(`• خبر ${this.escapeHtml(news.title).slice(0, 80)}`);
+        }
+      }
+
+      if (item.entityType === 'ARB') {
+        const arb = await this.prismaService.arbOpportunity.findUnique({ where: { id: item.entityId } });
+        if (arb) {
+          details.push(
+            `• آربیتراژ ${this.escapeHtml(arb.canonicalSymbol)} (${this.escapeHtml(arb.buyExchange)}→${this.escapeHtml(arb.sellExchange)})`,
+          );
         }
       }
     }
 
-    if (destinations.size === 0) {
-      this.logger.warn('No destinations configured for digest.');
-      return;
+    if (details.length > 0) {
+      lines.push('---');
+      lines.push(...details);
     }
 
-    for (const chatId of destinations) {
-      await this.signalsQueue.add(
-        'sendTelegramText',
-        { chatId, text: message, parseMode: 'HTML' },
-        { removeOnComplete: true, removeOnFail: { count: 50 } },
-      );
-    }
+    return lines.join('\n');
   }
 
-  private isDigestAllowedForChat(chatConfig: ChatConfig, now: Date): boolean {
-    if (!chatConfig.quietHoursEnabled) return true;
-    const start = chatConfig.quietHoursStart;
-    const end = chatConfig.quietHoursEnd;
-    if (!start || !end) return true;
-
-    const [startH, startM] = start.split(':').map(Number);
-    const [endH, endM] = end.split(':').map(Number);
-    if ([startH, startM, endH, endM].some((v) => Number.isNaN(v))) return true;
-
-    const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-
-    if (startMinutes === endMinutes) return true;
-    if (startMinutes < endMinutes) {
-      return !(minutes >= startMinutes && minutes < endMinutes);
+  private resolveDigestTimes(chatConfig: ChatConfig): string[] {
+    if (chatConfig.digestEnabled === false) {
+      return [];
     }
-    return !(minutes >= startMinutes || minutes < endMinutes);
+
+    if (chatConfig.digestTimes?.length) {
+      return chatConfig.digestTimes;
+    }
+
+    const raw = this.configService.get<string | string[]>('NOTIF_DIGEST_TIMES_DEFAULT', []);
+    if (Array.isArray(raw)) {
+      return raw.map((item) => String(item)).filter(Boolean);
+    }
+
+    if (typeof raw === 'string') {
+      return raw
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    return [];
+  }
+
+  private matchDigestTime(now: Date, timeZone: string, times: string[]): string | null {
+    const local = DateTime.fromJSDate(now, { zone: timeZone });
+    const safe = local.isValid ? local : DateTime.fromJSDate(now, { zone: 'UTC' });
+    if (!safe.isValid) return null;
+
+    const current = `${String(safe.hour).padStart(2, '0')}:${String(safe.minute).padStart(2, '0')}`;
+    return times.includes(current) ? current : null;
+  }
+
+  private getDigestKey(chatId: string, now: Date, timeZone: string): string {
+    const dateKey = this.toDateKey(now, timeZone);
+    return `digest:chat:${chatId}:${dateKey}:items`;
+  }
+
+  private toDateKey(now: Date, timeZone: string): string {
+    const local = DateTime.fromJSDate(now, { zone: timeZone });
+    const safe = local.isValid ? local : DateTime.fromJSDate(now, { zone: 'UTC' });
+    return safe.toISODate() ?? now.toISOString().slice(0, 10);
+  }
+
+  private getTimeZone(): string {
+    return this.configService.get<string>('APP_TIMEZONE', 'Europe/Berlin');
   }
 
   private escapeHtml(value: string): string {

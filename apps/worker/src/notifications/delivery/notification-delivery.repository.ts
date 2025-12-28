@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@libs/core';
 
-export type NotificationDeliveryStatus = 'SENT' | 'SKIPPED' | 'FAILED';
+export type NotificationDeliveryStatus = 'QUEUED' | 'SENT' | 'FAILED' | 'SKIPPED' | 'BUFFERED';
 
 @Injectable()
 export class NotificationDeliveryRepository {

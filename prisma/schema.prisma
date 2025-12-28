@@ -216,7 +216,7 @@ model NotificationDelivery {
   entityType        String
   entityId          String
   chatId            String
-  status            String   @default("SENT")
+  status            NotificationDeliveryStatus @default(QUEUED)
   reason            String?
   providerMessageId String?
   createdAt         DateTime @default(now())
@@ -246,4 +246,12 @@ enum ChatType {
   private
   group
   channel
+}
+
+enum NotificationDeliveryStatus {
+  QUEUED
+  SENT
+  FAILED
+  SKIPPED
+  BUFFERED
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { evaluatePolicy, ChatPreferences } from '../apps/worker/src/notifications/policy/policy-engine';
+import {
+  evaluatePolicy,
+  ChatPreferences,
+  isInQuietHours,
+} from '../apps/worker/src/notifications/policy/policy-engine';
+import { normalizeMode } from '../apps/worker/src/notifications/policy/mode-presets';
 
 const basePrefs = (): ChatPreferences => ({
   chatId: 'chat-1',
@@ -27,7 +32,8 @@ describe('notification policy engine', () => {
     const decision = evaluatePolicy({
       entityType: 'SIGNAL',
       preferences: basePrefs(),
-      now: new Date(Date.UTC(2024, 1, 1, 0, 30)),
+      now: new Date(Date.UTC(2024, 1, 1, 23, 30)),
+      timeZone: 'Europe/Berlin',
       signal: {
         assetType: 'CRYPTO',
         instrument: 'BTCUSDT',
@@ -40,7 +46,7 @@ describe('notification policy engine', () => {
       cooldownHit: false,
     });
 
-    expect(decision.allowed).toBe(false);
+    expect(decision.action).toBe('SKIP');
     expect(decision.reason).toBe('quiet_hours');
   });
 
@@ -49,6 +55,7 @@ describe('notification policy engine', () => {
       entityType: 'SIGNAL',
       preferences: basePrefs(),
       now: new Date(),
+      timeZone: 'Europe/Berlin',
       signal: {
         assetType: 'CRYPTO',
         instrument: 'BTCUSDT',
@@ -61,7 +68,7 @@ describe('notification policy engine', () => {
       cooldownHit: false,
     });
 
-    expect(decision.allowed).toBe(false);
+    expect(decision.action).toBe('SKIP');
     expect(decision.reason).toBe('rate_limit');
   });
 
@@ -73,6 +80,7 @@ describe('notification policy engine', () => {
       entityType: 'SIGNAL',
       preferences: prefs,
       now: new Date(),
+      timeZone: 'Europe/Berlin',
       signal: {
         assetType: 'CRYPTO',
         instrument: 'ETHUSDT',
@@ -85,7 +93,7 @@ describe('notification policy engine', () => {
       cooldownHit: false,
     });
 
-    expect(decision.allowed).toBe(false);
+    expect(decision.action).toBe('SKIP');
     expect(decision.reason).toBe('watchlist_filtered');
   });
 
@@ -97,6 +105,7 @@ describe('notification policy engine', () => {
       entityType: 'NEWS',
       preferences: prefs,
       now: new Date(),
+      timeZone: 'Europe/Berlin',
       news: {
         provider: 'okx',
         title: 'Test',
@@ -108,7 +117,7 @@ describe('notification policy engine', () => {
       cooldownHit: false,
     });
 
-    expect(decision.allowed).toBe(false);
+    expect(decision.action).toBe('SKIP');
     expect(decision.reason).toBe('provider_filtered');
   });
 
@@ -117,6 +126,7 @@ describe('notification policy engine', () => {
       entityType: 'ARB',
       preferences: basePrefs(),
       now: new Date(),
+      timeZone: 'Europe/Berlin',
       arb: {
         canonicalSymbol: 'BTCUSDT',
         buyExchange: 'binance',
@@ -128,7 +138,66 @@ describe('notification policy engine', () => {
       cooldownHit: true,
     });
 
-    expect(decision.allowed).toBe(false);
+    expect(decision.action).toBe('SKIP');
     expect(decision.reason).toBe('cooldown');
+  });
+
+  it('buffers non-high-priority notifications when digest is enabled', () => {
+    const prefs = basePrefs();
+    prefs.digestEnabled = true;
+
+    const decision = evaluatePolicy({
+      entityType: 'SIGNAL',
+      preferences: prefs,
+      now: new Date(),
+      timeZone: 'Europe/Berlin',
+      signal: {
+        assetType: 'CRYPTO',
+        instrument: 'BTCUSDT',
+        interval: '15m',
+        strategy: 'ema_rsi',
+        confidence: 70,
+        source: 'BINANCE',
+      },
+      rateLimitHit: false,
+      cooldownHit: false,
+    });
+
+    expect(decision.action).toBe('DIGEST');
+  });
+
+  it('allows high-priority notifications even when digest is enabled', () => {
+    const prefs = basePrefs();
+    prefs.digestEnabled = true;
+
+    const decision = evaluatePolicy({
+      entityType: 'SIGNAL',
+      preferences: prefs,
+      now: new Date(),
+      timeZone: 'Europe/Berlin',
+      signal: {
+        assetType: 'CRYPTO',
+        instrument: 'BTCUSDT',
+        interval: '15m',
+        strategy: 'ema_rsi',
+        confidence: 90,
+        source: 'BINANCE',
+      },
+      rateLimitHit: false,
+      cooldownHit: false,
+    });
+
+    expect(decision.action).toBe('ALLOW');
+  });
+
+  it('maps legacy modes to new presets', () => {
+    expect(normalizeMode('QUIET')).toBe('SLEEP');
+    expect(normalizeMode('AGGRESSIVE')).toBe('SCALP');
+  });
+
+  it('handles overnight quiet hours using timezone', () => {
+    const now = new Date(Date.UTC(2024, 1, 1, 23, 30));
+    const inQuiet = isInQuietHours(now, '23:00', '08:00', 'Europe/Berlin');
+    expect(inQuiet).toBe(true);
   });
 });

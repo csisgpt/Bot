@@ -25,6 +25,7 @@ interface TradingViewIngestJob {
 @Processor(SIGNALS_QUEUE_NAME, { concurrency: SIGNALS_QUEUE_CONCURRENCY })
 export class SignalsProcessor extends WorkerHost {
   private readonly logger = new Logger(SignalsProcessor.name);
+  private readonly legacySignalDeliveryLogEnabled: boolean;
 
   constructor(
     private readonly configService: ConfigService,
@@ -36,6 +37,10 @@ export class SignalsProcessor extends WorkerHost {
     private readonly notificationOrchestrator: NotificationOrchestratorService,
   ) {
     super();
+    this.legacySignalDeliveryLogEnabled = this.configService.get<boolean>(
+      'LEGACY_SIGNAL_DELIVERY_LOG_ENABLED',
+      false,
+    );
   }
 
   async process(job: Job<any>): Promise<void> {
@@ -140,14 +145,16 @@ export class SignalsProcessor extends WorkerHost {
           data: { status: 'SENT', providerMessageId: String(messageId) },
         });
       }
-      await this.prismaService.signalDeliveryLog.create({
-        data: {
-          signalId: signal.id ?? 'unknown',
-          chatId,
-          messageId: String(messageId),
-          status: 'SENT',
-        },
-      });
+      if (this.legacySignalDeliveryLogEnabled) {
+        await this.prismaService.signalDeliveryLog.create({
+          data: {
+            signalId: signal.id ?? 'unknown',
+            chatId,
+            messageId: String(messageId),
+            status: 'SENT',
+          },
+        });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       const data = job.data;
@@ -160,15 +167,17 @@ export class SignalsProcessor extends WorkerHost {
           data: { status: 'FAILED', reason: message },
         });
       }
-      await this.prismaService.signalDeliveryLog.create({
-        data: {
-          signalId: data.signal.id ?? 'unknown',
-          chatId: data.chatId,
-          messageId: 'unknown',
-          status: 'FAILED',
-          error: message,
-        },
-      });
+      if (this.legacySignalDeliveryLogEnabled) {
+        await this.prismaService.signalDeliveryLog.create({
+          data: {
+            signalId: data.signal.id ?? 'unknown',
+            chatId: data.chatId,
+            messageId: 'unknown',
+            status: 'FAILED',
+            error: message,
+          },
+        });
+      }
       // ✅ خیلی مهم: throw تا attempts/backoff عمل کنه
       throw err;
     }
@@ -179,11 +188,15 @@ export class SignalsProcessor extends WorkerHost {
   ): Promise<void> {
     const payload = telegramTextJobSchema.parse(job.data);
     try {
-      await this.telegramService.sendMessage(String(payload.chatId), payload.text, payload.parseMode);
+      const messageId = await this.telegramService.sendMessage(
+        String(payload.chatId),
+        payload.text,
+        payload.parseMode,
+      );
       if (payload.notificationDeliveryId) {
         await this.prismaService.notificationDelivery.update({
           where: { id: payload.notificationDeliveryId },
-          data: { status: 'SENT' },
+          data: { status: 'SENT', providerMessageId: String(messageId) },
         });
       }
     } catch (err) {

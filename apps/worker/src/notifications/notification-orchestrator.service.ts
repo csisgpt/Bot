@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { ChatConfig } from '@prisma/client';
+import { DateTime } from 'luxon';
 import { PrismaService, RedisService, SIGNALS_QUEUE_NAME } from '@libs/core';
 import { MessageFormatterService } from './formatting/message-formatter.service';
 import { NotificationDeliveryRepository } from './delivery/notification-delivery.repository';
@@ -15,11 +16,12 @@ import {
   ArbSnapshot,
   EnabledFeatures,
 } from './policy/policy-engine';
-import { getModePreset } from './policy/mode-presets';
+import { getModePreset, normalizeMode } from './policy/mode-presets';
 
 const RATE_LIMIT_TTL_SECONDS = 2 * 60 * 60;
 const STATS_BUCKET_TTL_SECONDS = 60 * 60;
 const STATS_WINDOW_MINUTES = 15;
+const DIGEST_BUFFER_TTL_SECONDS = 60 * 60 * 48;
 
 @Injectable()
 export class NotificationOrchestratorService {
@@ -121,6 +123,8 @@ export class NotificationOrchestratorService {
       skippedReasons: {} as Record<string, number>,
     };
 
+    const timeZone = this.getTimeZone();
+
     for (const chatConfig of chatConfigs) {
       const targetChatId = this.getTargetChatId(chatConfig);
       if (!targetChatId) {
@@ -130,10 +134,17 @@ export class NotificationOrchestratorService {
       }
 
       const preferences = this.buildPreferences(chatConfig);
+      const existing = await this.deliveryRepository.findExisting(entityType, entityId, targetChatId);
+      if (existing) {
+        this.bumpSkip(summary, 'duplicate');
+        continue;
+      }
+
       const baseDecision = evaluatePolicy({
         entityType,
         preferences,
         now,
+        timeZone,
         signal: entityType === 'SIGNAL' ? (entity as SignalSnapshot) : undefined,
         news: entityType === 'NEWS' ? (entity as NewsSnapshot) : undefined,
         arb: entityType === 'ARB' ? (entity as ArbSnapshot) : undefined,
@@ -141,7 +152,26 @@ export class NotificationOrchestratorService {
         cooldownHit: false,
       });
 
-      if (!baseDecision.allowed) {
+      if (baseDecision.action === 'DIGEST') {
+        await this.bufferDigest(entityType, entityId, targetChatId);
+        await this.deliveryRepository
+          .createDelivery({
+            entityType,
+            entityId,
+            chatId: targetChatId,
+            status: 'BUFFERED',
+            reason: baseDecision.reason ?? 'digest_buffered',
+          })
+          .catch((error: unknown) => {
+            if (this.isUniqueViolation(error)) {
+              return;
+            }
+            throw error;
+          });
+        continue;
+      }
+
+      if (baseDecision.action === 'SKIP') {
         await this.recordSkipped(entityType, entityId, targetChatId, baseDecision.reason ?? 'blocked');
         this.bumpSkip(summary, baseDecision.reason ?? 'blocked');
         continue;
@@ -155,6 +185,7 @@ export class NotificationOrchestratorService {
         entityType,
         preferences,
         now,
+        timeZone,
         signal: entityType === 'SIGNAL' ? (entity as SignalSnapshot) : undefined,
         news: entityType === 'NEWS' ? (entity as NewsSnapshot) : undefined,
         arb: entityType === 'ARB' ? (entity as ArbSnapshot) : undefined,
@@ -162,15 +193,10 @@ export class NotificationOrchestratorService {
         cooldownHit,
       });
 
-      if (!decision.allowed) {
-        await this.recordSkipped(entityType, entityId, targetChatId, decision.reason ?? 'blocked');
-        this.bumpSkip(summary, decision.reason ?? 'blocked');
-        continue;
-      }
-
-      const existing = await this.deliveryRepository.findExisting(entityType, entityId, targetChatId);
-      if (existing) {
-        this.bumpSkip(summary, 'duplicate');
+      if (decision.action !== 'ALLOW') {
+        const reason = decision.reason ?? 'blocked';
+        await this.recordSkipped(entityType, entityId, targetChatId, reason);
+        this.bumpSkip(summary, reason);
         continue;
       }
 
@@ -179,7 +205,7 @@ export class NotificationOrchestratorService {
           entityType,
           entityId,
           chatId: targetChatId,
-          status: 'SENT',
+          status: 'QUEUED',
         })
         .catch((error: unknown) => {
           if (this.isUniqueViolation(error)) {
@@ -244,10 +270,13 @@ export class NotificationOrchestratorService {
 
   private buildPreferences(chatConfig: ChatConfig): ChatPreferences {
     const enabledFeatures = this.parseEnabledFeatures(chatConfig.enabledFeatures);
+    const mode = normalizeMode(
+      chatConfig.mode ?? this.configService.get<string>('NOTIF_MODE_DEFAULT', 'NORMAL'),
+    );
 
     return {
       chatId: chatConfig.chatId,
-      mode: chatConfig.mode ?? this.configService.get<string>('NOTIF_MODE_DEFAULT', 'NORMAL'),
+      mode,
       watchlist: chatConfig.watchlist ?? [],
       enabledProviders: chatConfig.enabledProviders ?? [],
       enabledFeatures,
@@ -350,12 +379,15 @@ export class NotificationOrchestratorService {
     entity: SignalSnapshot | NewsSnapshot | ArbSnapshot,
     preferences: ChatPreferences,
   ): { key: string | null; ttl: number } {
+    const modePreset = getModePreset(preferences.mode);
+    const multiplier = modePreset.cooldownMultiplier ?? 1;
+
     if (entityType === 'SIGNAL') {
       const signal = entity as SignalSnapshot;
       const scope = `${signal.instrument}:${signal.interval}:${signal.strategy}`;
       return {
         key: `cd:chat:${chatId}:${entityType}:${scope}`,
-        ttl: preferences.cooldownSignalsSec,
+        ttl: Math.round(preferences.cooldownSignalsSec * multiplier),
       };
     }
 
@@ -364,7 +396,7 @@ export class NotificationOrchestratorService {
       const scope = `${news.provider}:${news.category}:${this.hashString(news.url)}`;
       return {
         key: `cd:chat:${chatId}:${entityType}:${scope}`,
-        ttl: preferences.cooldownNewsSec,
+        ttl: Math.round(preferences.cooldownNewsSec * multiplier),
       };
     }
 
@@ -373,7 +405,7 @@ export class NotificationOrchestratorService {
       const scope = `${arb.canonicalSymbol}:${arb.buyExchange}:${arb.sellExchange}`;
       return {
         key: `cd:chat:${chatId}:${entityType}:${scope}`,
-        ttl: preferences.cooldownArbSec,
+        ttl: Math.round(preferences.cooldownArbSec * multiplier),
       };
     }
 
@@ -446,6 +478,21 @@ export class NotificationOrchestratorService {
     await this.trackStats('skipped');
   }
 
+  private async bufferDigest(
+    entityType: NotificationEntityType,
+    entityId: string,
+    chatId: string,
+  ): Promise<void> {
+    const key = this.getDigestKey(chatId, new Date());
+    const payload = JSON.stringify({
+      entityType,
+      entityId,
+      createdAt: new Date().toISOString(),
+    });
+    await this.redisService.rpush(key, payload);
+    await this.redisService.expire(key, DIGEST_BUFFER_TTL_SECONDS);
+  }
+
   private bumpSkip(summary: { skippedCount: number; skippedReasons: Record<string, number> }, reason: string) {
     summary.skippedCount += 1;
     summary.skippedReasons[reason] = (summary.skippedReasons[reason] ?? 0) + 1;
@@ -475,6 +522,18 @@ export class NotificationOrchestratorService {
     const hour = String(date.getUTCHours()).padStart(2, '0');
     const minute = String(date.getUTCMinutes()).padStart(2, '0');
     return `${year}${month}${day}${hour}${minute}`;
+  }
+
+  private getDigestKey(chatId: string, now: Date): string {
+    const timeZone = this.getTimeZone();
+    const zoned = DateTime.fromJSDate(now, { zone: timeZone });
+    const safe = zoned.isValid ? zoned : DateTime.fromJSDate(now, { zone: 'UTC' });
+    const dateKey = safe.toISODate() ?? now.toISOString().slice(0, 10);
+    return `digest:chat:${chatId}:${dateKey}:items`;
+  }
+
+  private getTimeZone(): string {
+    return this.configService.get<string>('APP_TIMEZONE', 'Europe/Berlin');
   }
 
   private hashString(value: string): string {
