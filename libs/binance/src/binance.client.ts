@@ -29,12 +29,18 @@ export class BinanceClient {
     });
   }
 
-  async getKlines(symbol: string, interval: string, limit = 200): Promise<Kline[]> {
+  async getKlines(
+    symbol: string,
+    interval: string,
+    limit = 200,
+    endTime?: number,
+  ): Promise<Kline[]> {
     const response = await this.http.get('/api/v3/klines', {
       params: {
         symbol,
         interval,
         limit,
+        endTime,
       },
     });
 

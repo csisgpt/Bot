@@ -102,6 +102,26 @@ model SignalFeedback {
   @@index([signalId])
 }
 
+model Candle {
+  id         String   @id @default(uuid())
+  source     String
+  assetType  String
+  instrument String
+  timeframe  String
+  time       DateTime
+  open       Float
+  high       Float
+  low        Float
+  close      Float
+  volume     Float?
+  rawPayload Json?
+  createdAt  DateTime @default(now())
+
+  @@unique([source, instrument, timeframe, time])
+  @@index([source, instrument, timeframe, time])
+  @@index([instrument, timeframe, time])
+}
+
 enum SignalSource {
   BINANCE
   TRADINGVIEW

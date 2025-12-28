@@ -6,6 +6,7 @@ import { BinanceModule } from '@libs/binance';
 import { SignalsModule } from '@libs/signals';
 import { TelegramModule } from '@libs/telegram';
 import { HealthController } from './health.controller';
+import { MarketDataModule } from './market-data/market-data.module';
 import { SignalsCron } from './cron/signals.cron';
 import { PriceTickerCron } from './cron/price-ticker.cron';
 import { ConfigService } from '@nestjs/config';
@@ -20,6 +21,7 @@ import { DigestCron } from './cron/digest.cron';
     BinanceModule,
     SignalsModule,
     TelegramModule,
+    MarketDataModule,
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [CoreModule],
