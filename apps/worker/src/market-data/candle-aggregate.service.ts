@@ -15,6 +15,7 @@ export class CandleAggregateService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CandleAggregateService.name);
   private readonly windows = new Map<string, AggregateWindow>();
   private readonly enabled: boolean;
+  private readonly concurrency: number;
 
   constructor(
     private readonly configService: ConfigService,
@@ -23,6 +24,7 @@ export class CandleAggregateService implements OnModuleInit, OnModuleDestroy {
     private readonly monitoringPlanService: MonitoringPlanService,
   ) {
     this.enabled = this.configService.get<boolean>('CANDLE_AGGREGATE_ENABLED', true);
+    this.concurrency = this.configService.get<number>('CANDLE_AGGREGATE_CONCURRENCY', 5);
   }
 
   onModuleInit(): void {
@@ -69,75 +71,21 @@ export class CandleAggregateService implements OnModuleInit, OnModuleDestroy {
       const bucketEnd = new Date(bucketStartMs + intervalMs);
 
       let upserted = 0;
-      for (const symbol of plan.activeSymbols) {
-        const instrument = this.normalizeSymbol(symbol);
-        const baseCandles = await this.prismaService.candle.findMany({
-          where: {
-            source: this.marketDataProvider.source,
-            instrument,
-            timeframe: '1m',
-            time: {
-              gte: bucketStart,
-              lt: bucketEnd,
-            },
-          },
-          orderBy: { time: 'asc' },
-        });
-
-        if (!baseCandles.length) {
-          continue;
-        }
-
-        const open = baseCandles[0].open;
-        const close = baseCandles[baseCandles.length - 1].close;
-        const high = Math.max(...baseCandles.map((candle) => candle.high));
-        const low = Math.min(...baseCandles.map((candle) => candle.low));
-        const volume = baseCandles.reduce((sum, candle) => sum + (candle.volume ?? 0), 0);
-        const assetType = this.monitoringPlanService.getAssetType(symbol);
-
-        await this.prismaService.candle.upsert({
-          where: {
-            source_instrument_timeframe_time: {
-              source: this.marketDataProvider.source,
-              instrument,
-              timeframe,
-              time: bucketStart,
-            },
-          },
-          update: {
-            open,
-            high,
-            low,
-            close,
-            volume,
-            rawPayload: {
-              baseTimeframe: '1m',
-              startTime: bucketStart.toISOString(),
-              endTime: bucketEnd.toISOString(),
-              count: baseCandles.length,
-            },
-          },
-          create: {
-            source: this.marketDataProvider.source,
-            assetType,
-            instrument,
+      await this.runWithConcurrency(
+        plan.activeSymbols,
+        this.concurrency,
+        async (symbol) => {
+          const didUpsert = await this.aggregateSymbol(
+            symbol,
             timeframe,
-            time: bucketStart,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            rawPayload: {
-              baseTimeframe: '1m',
-              startTime: bucketStart.toISOString(),
-              endTime: bucketEnd.toISOString(),
-              count: baseCandles.length,
-            },
-          },
-        });
-        upserted += 1;
-      }
+            bucketStart,
+            bucketEnd,
+          );
+          if (didUpsert) {
+            upserted += 1;
+          }
+        },
+      );
 
       if (upserted > 0) {
         this.logger.log(`تجمیع ${timeframe} انجام شد: ${upserted} کندل`);
@@ -182,5 +130,96 @@ export class CandleAggregateService implements OnModuleInit, OnModuleDestroy {
       .trim()
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, '');
+  }
+
+  private async aggregateSymbol(
+    symbol: string,
+    timeframe: string,
+    bucketStart: Date,
+    bucketEnd: Date,
+  ): Promise<boolean> {
+    const instrument = this.normalizeSymbol(symbol);
+    const baseCandles = await this.prismaService.candle.findMany({
+      where: {
+        source: this.marketDataProvider.source,
+        instrument,
+        timeframe: '1m',
+        time: {
+          gte: bucketStart,
+          lt: bucketEnd,
+        },
+      },
+      orderBy: { time: 'asc' },
+    });
+
+    if (!baseCandles.length) {
+      return false;
+    }
+
+    const open = baseCandles[0].open;
+    const close = baseCandles[baseCandles.length - 1].close;
+    const high = Math.max(...baseCandles.map((candle) => candle.high));
+    const low = Math.min(...baseCandles.map((candle) => candle.low));
+    const volume = baseCandles.reduce((sum, candle) => sum + (candle.volume ?? 0), 0);
+    const assetType = this.monitoringPlanService.getAssetType(symbol);
+
+    await this.prismaService.candle.upsert({
+      where: {
+        source_instrument_timeframe_time: {
+          source: this.marketDataProvider.source,
+          instrument,
+          timeframe,
+          time: bucketStart,
+        },
+      },
+      update: {
+        open,
+        high,
+        low,
+        close,
+        volume,
+        rawPayload: {
+          baseTimeframe: '1m',
+          startTime: bucketStart.toISOString(),
+          endTime: bucketEnd.toISOString(),
+          count: baseCandles.length,
+        },
+      },
+      create: {
+        source: this.marketDataProvider.source,
+        assetType,
+        instrument,
+        timeframe,
+        time: bucketStart,
+        open,
+        high,
+        low,
+        close,
+        volume,
+        rawPayload: {
+          baseTimeframe: '1m',
+          startTime: bucketStart.toISOString(),
+          endTime: bucketEnd.toISOString(),
+          count: baseCandles.length,
+        },
+      },
+    });
+
+    return true;
+  }
+
+  private async runWithConcurrency<T>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T) => Promise<void>,
+  ): Promise<void> {
+    let index = 0;
+    const runners = new Array(Math.min(concurrency, items.length)).fill(null).map(async () => {
+      while (index < items.length) {
+        const current = items[index++];
+        await worker(current);
+      }
+    });
+    await Promise.all(runners);
   }
 }

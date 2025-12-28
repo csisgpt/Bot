@@ -110,6 +110,7 @@ const envObject = z
     CANDLE_INGEST_INTERVAL_SECONDS: toInt(60).pipe(z.number().int().min(10).max(3600)),
     CANDLE_INGEST_CONCURRENCY: toInt(5).pipe(z.number().int().min(1).max(50)),
     CANDLE_AGGREGATE_ENABLED: toBool(true).default(true),
+    CANDLE_AGGREGATE_CONCURRENCY: toInt(5).pipe(z.number().int().min(1).max(50)),
     AGG_TIMEFRAMES: csv(["5m", "15m"]).default(["5m", "15m"]),
 
     BINANCE_BASE_URL: z.string().trim().default("https://data-api.binance.vision"),

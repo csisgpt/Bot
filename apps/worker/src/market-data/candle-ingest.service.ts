@@ -4,6 +4,9 @@ import { PrismaService } from '@libs/core';
 import { BinanceMarketDataProvider, MarketDataKline } from '@libs/binance';
 import { MonitoringPlanService } from './monitoring-plan.service';
 
+export const isClosedCandle = (kline: MarketDataKline, nowMs = Date.now()): boolean =>
+  Number.isFinite(kline.closeTime) && kline.closeTime <= nowMs - 1000;
+
 @Injectable()
 export class CandleIngestService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CandleIngestService.name);
@@ -58,8 +61,9 @@ export class CandleIngestService implements OnModuleInit, OnModuleDestroy {
 
       let upserted = 0;
       await this.runWithConcurrency(plan.activeSymbols, this.concurrency, async (symbol) => {
+        const endTime = Date.now() - 1000;
         const klines = await this.retry(
-          () => this.marketDataProvider.getKlines(symbol, '1m', 2),
+          () => this.marketDataProvider.getKlines(symbol, '1m', 2, endTime),
           3,
           500,
         );
@@ -67,15 +71,22 @@ export class CandleIngestService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        const latestOpenTime = Math.max(...klines.map((kline) => kline.openTime));
-        if (Date.now() - latestOpenTime > this.intervalMs * 3) {
+        const closedKlines = klines.filter((kline) => isClosedCandle(kline, endTime));
+        if (closedKlines.length === 0) {
+          return;
+        }
+
+        const latestClosedCloseTime = Math.max(
+          ...closedKlines.map((kline) => kline.closeTime),
+        );
+        if (Date.now() - latestClosedCloseTime > this.intervalMs * 3) {
           this.logger.warn(`کندل ${symbol} قدیمی است`);
         }
 
         const assetType = this.monitoringPlanService.getAssetType(symbol);
         const instrument = this.normalizeSymbol(symbol);
 
-        for (const kline of klines) {
+        for (const kline of closedKlines) {
           const payload = this.toRawPayload(kline);
           await this.prismaService.candle.upsert({
             where: {
@@ -175,4 +186,5 @@ export class CandleIngestService implements OnModuleInit, OnModuleDestroy {
       closeTime: kline.closeTime,
     };
   }
+
 }
