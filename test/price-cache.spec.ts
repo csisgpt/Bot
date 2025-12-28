@@ -3,6 +3,6 @@ import { getPriceCacheKey } from '@libs/binance';
 
 describe('price cache keys', () => {
   it('normalizes symbols for cache keys', () => {
-    expect(getPriceCacheKey(' xautusdt ')).toBe('price:last:XAUTUSDT');
+    expect(getPriceCacheKey(' xautusdt ')).toBe('md:price:last:BINANCE:XAUTUSDT');
   });
 });

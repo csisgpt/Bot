@@ -30,8 +30,8 @@ export class BinanceWsService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     const enabled = this.configService.get<boolean>('BINANCE_WS_ENABLED', true);
-    const priceTickerEnabled = this.configService.get<boolean>('PRICE_TICKER_ENABLED', false);
-    if (!enabled || !priceTickerEnabled) {
+    const priceIngestEnabled = this.configService.get<boolean>('PRICE_INGEST_ENABLED', true);
+    if (!enabled || !priceIngestEnabled) {
       return;
     }
 
@@ -122,7 +122,7 @@ export class BinanceWsService implements OnModuleInit, OnModuleDestroy {
     const ts = Number.isFinite(event.E) ? event.E : Date.now();
 
     await this.redisService.set(
-      getPriceCacheKey(symbol),
+      getPriceCacheKey(symbol, 'BINANCE'),
       JSON.stringify({ price, ts }),
       'EX',
       this.ttlSeconds,

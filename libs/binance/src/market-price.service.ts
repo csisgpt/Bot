@@ -10,7 +10,9 @@ export interface PriceSnapshot {
 }
 
 export const normalizeSymbol = (symbol: string): string => symbol.trim().toUpperCase();
-export const getPriceCacheKey = (symbol: string): string =>
+export const getPriceCacheKey = (symbol: string, source = 'BINANCE'): string =>
+  `md:price:last:${source}:${normalizeSymbol(symbol)}`;
+export const getLegacyPriceCacheKey = (symbol: string): string =>
   `price:last:${normalizeSymbol(symbol)}`;
 
 @Injectable()
@@ -29,6 +31,7 @@ export class MarketPriceService {
   async getLastPrice(symbol: string): Promise<PriceSnapshot | null> {
     const normalized = normalizeSymbol(symbol);
     const cacheKey = getPriceCacheKey(normalized);
+    const legacyKey = getLegacyPriceCacheKey(normalized);
     const cached = await this.redisService.get(cacheKey);
 
     if (cached) {
@@ -40,6 +43,24 @@ export class MarketPriceService {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         this.logger.warn(`Failed to parse cached price for ${normalized}: ${message}`);
+      }
+    }
+    const legacyCached = await this.redisService.get(legacyKey);
+    if (legacyCached) {
+      try {
+        const parsed = JSON.parse(legacyCached) as { price: number; ts: number };
+        if (Number.isFinite(parsed.price) && Number.isFinite(parsed.ts)) {
+          await this.redisService.set(
+            cacheKey,
+            JSON.stringify({ price: parsed.price, ts: parsed.ts }),
+            'EX',
+            this.ttlSeconds,
+          );
+          return { symbol: normalized, price: parsed.price, ts: parsed.ts };
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.warn(`Failed to parse legacy price for ${normalized}: ${message}`);
       }
     }
 
