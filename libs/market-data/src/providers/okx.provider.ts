@@ -23,18 +23,16 @@ export class OkxMarketDataProvider extends EventEmitter implements MarketDataPro
   private timeframes: string[] = [];
   private tickerTimer?: NodeJS.Timeout;
   private candleTimer?: NodeJS.Timeout;
-  private readonly tickerIntervalMs: number;
-  private readonly candleIntervalMs: number;
+  private readonly pollIntervalMs: number;
+  private readonly restConcurrency: number;
 
   constructor(private readonly configService: ConfigService) {
     super();
     const restUrl = configService.get<string>('OKX_REST_URL', 'https://www.okx.com');
     const timeoutMs = configService.get<number>('OKX_REST_TIMEOUT_MS', 10000);
     this.restClient = createHttpClient(restUrl, timeoutMs);
-    this.tickerIntervalMs =
-      configService.get<number>('OKX_REST_TICKER_INTERVAL_SECONDS', 10) * 1000;
-    this.candleIntervalMs =
-      configService.get<number>('OKX_REST_CANDLE_INTERVAL_SECONDS', 60) * 1000;
+    this.pollIntervalMs = configService.get<number>('OKX_POLL_INTERVAL_MS', 10000);
+    this.restConcurrency = configService.get<number>('OKX_REST_CONCURRENCY', 4);
 
     const wsEnabled = configService.get<boolean>('OKX_WS_ENABLED', false);
     if (wsEnabled) {
@@ -88,13 +86,13 @@ export class OkxMarketDataProvider extends EventEmitter implements MarketDataPro
     if (!this.tickerTimer && this.tickerMappings.length) {
       this.tickerTimer = setInterval(() => {
         void this.pollTickers();
-      }, this.tickerIntervalMs);
+      }, this.pollIntervalMs);
       void this.pollTickers();
     }
     if (!this.candleTimer && this.candleMappings.length && this.timeframes.length) {
       this.candleTimer = setInterval(() => {
         void this.pollCandles();
-      }, this.candleIntervalMs);
+      }, this.pollIntervalMs);
       void this.pollCandles();
     }
   }
@@ -111,15 +109,18 @@ export class OkxMarketDataProvider extends EventEmitter implements MarketDataPro
   }
 
   private async pollTickers(): Promise<void> {
-    for (const mapping of this.tickerMappings) {
+    await this.runWithConcurrency(this.tickerMappings, async (mapping) => {
       try {
         const response = await retry(
-          () => this.restClient.get('/api/v5/market/ticker', { params: { instId: mapping.providerInstId } }),
-          { attempts: 3, baseDelayMs: 500 },
+          () =>
+            this.restClient.get('/api/v5/market/ticker', {
+              params: { instId: mapping.providerInstId },
+            }),
+          { attempts: 3, baseDelayMs: 500, shouldRetry: this.isRetryable },
         );
         const data = response.data?.data?.[0];
         if (!data) {
-          continue;
+          return;
         }
         const bid = Number(data.bidPx);
         const ask = Number(data.askPx);
@@ -143,41 +144,75 @@ export class OkxMarketDataProvider extends EventEmitter implements MarketDataPro
         const message = error instanceof Error ? error.message : 'Unknown error';
         this.lastError = message;
         this.logger.warn(
-          JSON.stringify({ event: 'provider_rest_error', provider: this.provider, message }),
+          JSON.stringify({
+            event: 'provider_rest_error',
+            provider: this.provider,
+            symbol: mapping.providerInstId,
+            message,
+          }),
         );
       }
-    }
+    });
   }
 
   private async pollCandles(): Promise<void> {
-    for (const mapping of this.candleMappings) {
-      for (const timeframe of this.timeframes) {
-        try {
-          const response = await retry(
-            () =>
-              this.restClient.get('/api/v5/market/candles', {
-                params: { instId: mapping.providerInstId, bar: timeframe, limit: 1 },
-              }),
-            { attempts: 3, baseDelayMs: 500 },
-          );
-          const data = response.data?.data?.[0];
-          if (!data) {
-            continue;
-          }
-          const candle = normalizeOkxRestCandle(data, mapping, timeframe);
-          if (candle) {
-            this.lastMessageTs = Date.now();
-            this.emit('candle', candle as Candle);
-          }
-        } catch (error) {
-          this.failures += 1;
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          this.lastError = message;
-          this.logger.warn(
-            JSON.stringify({ event: 'provider_rest_error', provider: this.provider, message }),
-          );
+    const tasks = this.candleMappings.flatMap((mapping) =>
+      this.timeframes.map((timeframe) => ({ mapping, timeframe })),
+    );
+    await this.runWithConcurrency(tasks, async ({ mapping, timeframe }) => {
+      try {
+        const response = await retry(
+          () =>
+            this.restClient.get('/api/v5/market/candles', {
+              params: { instId: mapping.providerInstId, bar: timeframe, limit: 1 },
+            }),
+          { attempts: 3, baseDelayMs: 500, shouldRetry: this.isRetryable },
+        );
+        const data = response.data?.data?.[0];
+        if (!data) {
+          return;
         }
+        const candle = normalizeOkxRestCandle(data, mapping, timeframe);
+        if (candle) {
+          this.lastMessageTs = Date.now();
+          this.emit('candle', candle as Candle);
+        }
+      } catch (error) {
+        this.failures += 1;
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        this.lastError = message;
+        this.logger.warn(
+          JSON.stringify({
+            event: 'provider_rest_error',
+            provider: this.provider,
+            symbol: mapping.providerInstId,
+            message,
+          }),
+        );
       }
+    });
+  }
+
+  private runWithConcurrency<T>(
+    items: T[],
+    worker: (item: T) => Promise<void>,
+  ): Promise<void> {
+    const concurrency = Math.max(1, this.restConcurrency);
+    let index = 0;
+    const runners = new Array(Math.min(concurrency, items.length)).fill(null).map(async () => {
+      while (index < items.length) {
+        const current = items[index++];
+        await worker(current);
+      }
+    });
+    return Promise.all(runners).then(() => undefined);
+  }
+
+  private isRetryable(error: unknown): boolean {
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    if (status) {
+      return status === 429 || status >= 500;
     }
+    return true;
   }
 }

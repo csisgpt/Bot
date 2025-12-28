@@ -1,35 +1,79 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Instrument, InstrumentMapping } from './models';
-import { seedInstrumentMappings, seedInstruments } from './instruments.seed';
+import { buildInstrumentFromSymbol, okxSymbolFromCanonical, normalizeCanonicalSymbol } from './symbol-mapper';
 
 @Injectable()
 export class InstrumentRegistryService {
-  private readonly instruments: Instrument[] = seedInstruments;
-  private readonly mappings: InstrumentMapping[] = seedInstrumentMappings;
+  private readonly logger = new Logger(InstrumentRegistryService.name);
+  private activeSymbols: string[] = [];
+
+  setActiveSymbols(symbols: string[]): void {
+    this.activeSymbols = symbols.map(normalizeCanonicalSymbol).filter(Boolean);
+  }
 
   getInstruments(): Instrument[] {
-    return this.instruments.filter((instrument) => instrument.isActive);
+    return this.activeSymbols
+      .map((symbol) => buildInstrumentFromSymbol(symbol))
+      .filter((instrument): instrument is Instrument => Boolean(instrument?.isActive));
+  }
+
+  getActiveSymbols(): string[] {
+    return [...this.activeSymbols];
   }
 
   getMappingsForProvider(provider: string): InstrumentMapping[] {
-    return this.mappings.filter(
-      (mapping) => mapping.provider === provider && mapping.isActive,
-    );
+    const normalizedProvider = provider.toLowerCase();
+    return this.buildMappings(normalizedProvider);
   }
 
   getMappingsForProviders(providers: string[]): InstrumentMapping[] {
-    return this.mappings.filter(
-      (mapping) => providers.includes(mapping.provider) && mapping.isActive,
-    );
+    return providers.flatMap((provider) => this.getMappingsForProvider(provider));
   }
 
   findMapping(provider: string, providerSymbol: string): InstrumentMapping | undefined {
-    const normalized = providerSymbol.trim().toUpperCase();
-    return this.mappings.find(
+    const normalizedProvider = provider.toLowerCase();
+    const normalizedSymbol = providerSymbol.trim().toUpperCase();
+    return this.buildMappings(normalizedProvider).find(
       (mapping) =>
-        mapping.provider === provider &&
-        mapping.isActive &&
-        (mapping.providerSymbol === normalized || mapping.providerInstId === normalized),
+        mapping.providerSymbol === normalizedSymbol ||
+        mapping.providerInstId === normalizedSymbol,
     );
+  }
+
+  private buildMappings(provider: string): InstrumentMapping[] {
+    return this.getInstruments()
+      .map((instrument) => {
+        if (provider === 'okx') {
+          const okxSymbol = okxSymbolFromCanonical(instrument.canonicalSymbol);
+          if (!okxSymbol) {
+            this.logger.warn(
+              JSON.stringify({
+                event: 'symbol_mapping_skipped',
+                provider,
+                symbol: instrument.canonicalSymbol,
+              }),
+            );
+            return null;
+          }
+          return {
+            provider,
+            canonicalSymbol: instrument.canonicalSymbol,
+            providerSymbol: okxSymbol,
+            providerInstId: okxSymbol,
+            marketType: 'spot',
+            isActive: true,
+          } as InstrumentMapping;
+        }
+
+        return {
+          provider,
+          canonicalSymbol: instrument.canonicalSymbol,
+          providerSymbol: instrument.canonicalSymbol,
+          providerInstId: instrument.canonicalSymbol,
+          marketType: 'spot',
+          isActive: true,
+        } as InstrumentMapping;
+      })
+      .filter((mapping): mapping is InstrumentMapping => Boolean(mapping));
   }
 }

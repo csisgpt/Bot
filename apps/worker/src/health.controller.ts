@@ -7,6 +7,8 @@ import { ProviderRegistryService } from '@libs/market-data';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ArbitrageScannerService } from './arbitrage/arbitrage-scanner.service';
+import { ActiveSymbolsService } from './market-data-v3/active-symbols.service';
+import { NewsFetcherService } from './news/news-fetcher.service';
 
 @Controller('health')
 export class HealthController {
@@ -17,6 +19,8 @@ export class HealthController {
     private readonly configService: ConfigService,
     private readonly providerRegistryService: ProviderRegistryService,
     private readonly arbitrageScannerService: ArbitrageScannerService,
+    private readonly activeSymbolsService: ActiveSymbolsService,
+    private readonly newsFetcherService: NewsFetcherService,
     @InjectQueue(SIGNALS_QUEUE_NAME)
     private readonly signalsQueue: Queue,
     @InjectQueue(MARKET_DATA_QUEUE_NAME)
@@ -94,6 +98,61 @@ export class HealthController {
     return { ok: true, providers: this.providerRegistryService.getSnapshots() };
   }
 
+  @Get('market-data-v3')
+  async marketDataV3(): Promise<{
+    ok: true;
+    enabledProviders: string[];
+    connectedProviders: number;
+    activeSymbolsCount: number;
+    sampleFreshness: Record<string, number | null>;
+    providerErrors: Record<string, string | null>;
+  }> {
+    const enabledProviders = this.configService
+      .get<string>('PROVIDERS_ENABLED', 'binance')
+      .split(',')
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+    const snapshots = this.providerRegistryService.getSnapshots();
+    const connectedProviders = snapshots.filter((snapshot) => snapshot.connected).length;
+    const activeSymbols = this.activeSymbolsService.getActiveSymbols();
+    const sampleSymbol = activeSymbols[0];
+    const sampleFreshness: Record<string, number | null> = {};
+
+    if (sampleSymbol) {
+      const keys = enabledProviders.map(
+        (provider) => `latest:book:${sampleSymbol}:${provider}`,
+      );
+      const values = await this.redisService.mget(...keys);
+      values.forEach((raw, index) => {
+        const provider = enabledProviders[index];
+        if (!raw) {
+          sampleFreshness[provider] = null;
+          return;
+        }
+        try {
+          const parsed = JSON.parse(raw) as { ts?: number };
+          sampleFreshness[provider] = parsed?.ts ?? null;
+        } catch (error) {
+          sampleFreshness[provider] = null;
+        }
+      });
+    }
+
+    const providerErrors: Record<string, string | null> = {};
+    snapshots.forEach((snapshot) => {
+      providerErrors[snapshot.provider] = snapshot.lastError ?? null;
+    });
+
+    return {
+      ok: true,
+      enabledProviders,
+      connectedProviders,
+      activeSymbolsCount: activeSymbols.length,
+      sampleFreshness,
+      providerErrors,
+    };
+  }
+
   @Get('queues')
   async queues(): Promise<{
     ok: true;
@@ -116,6 +175,17 @@ export class HealthController {
     staleSnapshots: number;
   } {
     const health = this.arbitrageScannerService.getHealth();
+    return { ok: true, ...health };
+  }
+
+  @Get('news')
+  news(): {
+    ok: true;
+    lastFetchAt: number | null;
+    lastStoredCount: number;
+    lastErrorByProvider: Record<string, string | null>;
+  } {
+    const health = this.newsFetcherService.getHealth();
     return { ok: true, ...health };
   }
 }

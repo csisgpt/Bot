@@ -3,6 +3,7 @@ export * from './interfaces';
 export * from './instrument-registry.service';
 export * from './provider-registry.service';
 export * from './market-data.module';
+export * from './symbol-mapper';
 export * from './normalizers';
 export * from './providers/binance.provider';
 export * from './providers/bybit.provider';

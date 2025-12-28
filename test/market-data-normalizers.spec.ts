@@ -77,6 +77,7 @@ describe('market data normalizers', () => {
 describe('market data normalization integration', () => {
   it('maps seeded instrument and normalizes candle', () => {
     const registry = new InstrumentRegistryService();
+    registry.setActiveSymbols(['BTCUSDT']);
     const [okxMapping] = registry.getMappingsForProvider('okx');
     const payload = ['1710000000000', '1', '2', '0.5', '1.5', '10'];
     const candle = normalizeOkxRestCandle(payload, okxMapping, '1m');

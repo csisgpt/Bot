@@ -200,6 +200,8 @@ const envObject = z
     OKX_REST_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
     OKX_REST_TICKER_INTERVAL_SECONDS: toInt(10).pipe(z.number().int().min(1).max(600)),
     OKX_REST_CANDLE_INTERVAL_SECONDS: toInt(60).pipe(z.number().int().min(10).max(3600)),
+    OKX_POLL_INTERVAL_MS: toInt(10000).pipe(z.number().int().min(1000).max(60_000)),
+    OKX_REST_CONCURRENCY: toInt(4).pipe(z.number().int().min(1).max(20)),
     OKX_WS_URL: z.string().trim().optional(),
     OKX_WS_ENABLED: toBool(false).default(false),
 

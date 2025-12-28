@@ -11,6 +11,7 @@ import {
 import { Queue } from 'bullmq';
 import { MARKET_DATA_QUEUE_NAME } from '@libs/core';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ActiveSymbolsService } from './active-symbols.service';
 
 @Injectable()
 export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
@@ -26,6 +27,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
     private readonly redisService: RedisService,
     private readonly instrumentRegistry: InstrumentRegistryService,
     private readonly providerRegistry: ProviderRegistryService,
+    private readonly activeSymbolsService: ActiveSymbolsService,
     @InjectQueue(MARKET_DATA_QUEUE_NAME)
     private readonly marketDataQueue: Queue,
   ) {
@@ -40,6 +42,8 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    const symbols = await this.activeSymbolsService.resolveActiveSymbols();
+    this.instrumentRegistry.setActiveSymbols(symbols);
     const providers = this.providerRegistry.getEnabledProviders();
     const instruments = this.instrumentRegistry.getInstruments();
 
@@ -48,6 +52,14 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       if (!mappings.length) {
         continue;
       }
+      this.logger.log(
+        JSON.stringify({
+          event: 'provider_subscribe',
+          provider: provider.provider,
+          symbols: mappings.length,
+          timeframes: this.timeframes.length,
+        }),
+      );
       provider.on('ticker', (ticker: Ticker) => void this.handleTicker(ticker));
       provider.on('candle', (candle: Candle) => void this.handleCandle(candle));
       this.providerListeners.set(provider.provider, () => {
@@ -94,6 +106,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
     if (!candle.isFinal) {
       return;
     }
+    const assetType = this.inferAssetType(candle.canonicalSymbol);
     await this.prismaService.marketCandle.upsert({
       where: {
         provider_canonicalSymbol_timeframe_openTime: {
@@ -127,10 +140,50 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
+    await this.prismaService.candle.upsert({
+      where: {
+        source_instrument_timeframe_time: {
+          source: candle.provider.toUpperCase(),
+          instrument: candle.canonicalSymbol,
+          timeframe: candle.timeframe,
+          time: new Date(candle.openTime),
+        },
+      },
+      update: {
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+        rawPayload: candle,
+      },
+      create: {
+        source: candle.provider.toUpperCase(),
+        assetType,
+        instrument: candle.canonicalSymbol,
+        timeframe: candle.timeframe,
+        time: new Date(candle.openTime),
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+        rawPayload: candle,
+      },
+    });
+
     await this.marketDataQueue.add('candle.close', candle, {
       removeOnComplete: true,
       attempts: 3,
       backoff: { type: 'exponential', delay: 500 },
     });
+  }
+
+  private inferAssetType(symbol: string): string {
+    const normalized = symbol.trim().toUpperCase();
+    if (normalized === 'XAUTUSDT' || normalized === 'PAXGUSDT') {
+      return 'GOLD';
+    }
+    return 'CRYPTO';
   }
 }

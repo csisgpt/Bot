@@ -105,6 +105,9 @@ MARKET_DATA_INGEST_ENABLED=true
 MARKET_DATA_TIMEFRAMES=1m
 ```
 
+Legacy mode (PR1 ingest) is used when `MARKET_DATA_INGEST_ENABLED=false`. In that mode, `CANDLE_INGEST_ENABLED` and `CANDLE_AGGREGATE_ENABLED` control the legacy Binance-only ingest/aggregation.
+For PR3 mode, keep `MARKET_DATA_INGEST_ENABLED=true` and leave legacy ingest flags on their defaults (they are ignored while v3 is enabled).
+
 WebSocket/REST endpoints:
 
 ```bash
@@ -112,6 +115,8 @@ BINANCE_WS_URL=wss://stream.binance.com:9443/stream
 BYBIT_WS_URL=wss://stream.bybit.com/v5/public/spot
 BYBIT_REST_URL=https://api.bybit.com
 OKX_REST_URL=https://www.okx.com
+OKX_POLL_INTERVAL_MS=10000
+OKX_REST_CONCURRENCY=4
 OKX_WS_ENABLED=false
 ```
 
@@ -127,6 +132,8 @@ Redis keys written by the ingest worker:
 
 - `latest:ticker:{canonicalSymbol}:{provider}` -> JSON (last/bid/ask/ts)
 - `latest:book:{canonicalSymbol}:{provider}` -> JSON (bid/ask/ts)
+
+PR3 ingestion writes to both `MarketCandle` and the legacy `Candle` table so the existing PR2 signal engine continues to work.
 
 ### Arbitrage scanner
 
@@ -166,8 +173,10 @@ pnpm dev:worker
 Health endpoints:
 
 - `GET /health/providers` (provider connections)
+- `GET /health/market-data-v3` (provider stats + active symbols)
 - `GET /health/queues` (queue depth)
 - `GET /health/arbitrage` (last scan + stale counts)
+- `GET /health/news` (last fetch + errors)
 
 ### Assets and instruments
 

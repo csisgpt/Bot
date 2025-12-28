@@ -29,6 +29,10 @@ export class CandleIngestService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
+    if (this.configService.get<boolean>('MARKET_DATA_INGEST_ENABLED', false)) {
+      this.logger.warn('اینجست قدیمی غیرفعال شد چون بازار چندمنبعی فعال است');
+      return;
+    }
     if (!this.enabled) {
       this.logger.log('اینجست کندل غیرفعال است');
       return;

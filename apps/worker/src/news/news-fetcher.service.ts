@@ -13,6 +13,9 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
   private readonly intervalMs: number;
   private timer?: NodeJS.Timeout;
   private readonly providers: NewsProvider[];
+  private lastFetchAt: number | null = null;
+  private lastStoredCount = 0;
+  private readonly lastErrorByProvider: Record<string, string | null> = {};
 
   constructor(
     private readonly configService: ConfigService,
@@ -26,6 +29,9 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
       new BybitNewsProvider(configService),
       new OkxNewsProvider(configService),
     ];
+    for (const provider of this.providers) {
+      this.lastErrorByProvider[provider.provider] = null;
+    }
   }
 
   onModuleInit(): void {
@@ -52,6 +58,7 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
       .map((item) => item.trim().toLowerCase())
       .filter(Boolean);
 
+    let totalStored = 0;
     for (const provider of this.providers) {
       if (!enabledProviders.includes(provider.provider)) {
         continue;
@@ -60,21 +67,26 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
         const rawItems = await provider.fetchLatest();
         const normalized = provider.normalize(rawItems);
         const deduped = provider.dedupe(normalized);
-        await this.storeItems(deduped);
+        const stored = await this.storeItems(deduped);
+        totalStored += stored;
+        this.lastErrorByProvider[provider.provider] = null;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
+        this.lastErrorByProvider[provider.provider] = message;
         this.logger.warn(
           JSON.stringify({ event: 'news_fetch_failed', provider: provider.provider, message }),
         );
       }
     }
+    this.lastFetchAt = Date.now();
+    this.lastStoredCount = totalStored;
   }
 
-  private async storeItems(items: NewsItem[]): Promise<void> {
+  private async storeItems(items: NewsItem[]): Promise<number> {
     if (!items.length) {
-      return;
+      return 0;
     }
-    await this.prismaService.news.createMany({
+    const result = await this.prismaService.news.createMany({
       data: items.map((item) => ({
         provider: item.provider,
         ts: new Date(item.ts),
@@ -87,6 +99,20 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
       })),
       skipDuplicates: true,
     });
-    this.logger.log(`خبرهای جدید ذخیره شد: ${items.length}`);
+    const storedCount = result.count ?? items.length;
+    this.logger.log(`خبرهای جدید ذخیره شد: ${storedCount}`);
+    return storedCount;
+  }
+
+  getHealth(): {
+    lastFetchAt: number | null;
+    lastStoredCount: number;
+    lastErrorByProvider: Record<string, string | null>;
+  } {
+    return {
+      lastFetchAt: this.lastFetchAt,
+      lastStoredCount: this.lastStoredCount,
+      lastErrorByProvider: { ...this.lastErrorByProvider },
+    };
   }
 }

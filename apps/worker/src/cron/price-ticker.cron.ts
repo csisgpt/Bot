@@ -18,6 +18,10 @@ export class PriceTickerCron implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    if (this.configService.get<boolean>('MARKET_DATA_INGEST_ENABLED', false)) {
+      this.logger.warn('قیمت‌زن قدیمی غیرفعال شد چون بازار چندمنبعی فعال است');
+      return;
+    }
     const enabled = this.configService.get<boolean>('PRICE_TICKER_ENABLED', false);
     if (!enabled) {
       return;
