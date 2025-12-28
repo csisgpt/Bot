@@ -1,8 +1,12 @@
 import { Controller, Get } from '@nestjs/common';
-import { PrismaService, RedisService } from '@libs/core';
+import { PrismaService, RedisService, MARKET_DATA_QUEUE_NAME, SIGNALS_QUEUE_NAME } from '@libs/core';
 import { getPriceCacheKey } from '@libs/binance';
 import { MonitoringPlanService } from './market-data/monitoring-plan.service';
 import { ConfigService } from '@nestjs/config';
+import { ProviderRegistryService } from '@libs/market-data';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { ArbitrageScannerService } from './arbitrage/arbitrage-scanner.service';
 
 @Controller('health')
 export class HealthController {
@@ -11,6 +15,12 @@ export class HealthController {
     private readonly redisService: RedisService,
     private readonly monitoringPlanService: MonitoringPlanService,
     private readonly configService: ConfigService,
+    private readonly providerRegistryService: ProviderRegistryService,
+    private readonly arbitrageScannerService: ArbitrageScannerService,
+    @InjectQueue(SIGNALS_QUEUE_NAME)
+    private readonly signalsQueue: Queue,
+    @InjectQueue(MARKET_DATA_QUEUE_NAME)
+    private readonly marketDataQueue: Queue,
   ) {}
 
   @Get()
@@ -77,5 +87,35 @@ export class HealthController {
       isPriceStale,
       isCandleStale,
     };
+  }
+
+  @Get('providers')
+  providers(): { ok: true; providers: ReturnType<ProviderRegistryService['getSnapshots']> } {
+    return { ok: true, providers: this.providerRegistryService.getSnapshots() };
+  }
+
+  @Get('queues')
+  async queues(): Promise<{
+    ok: true;
+    signals: Record<string, number>;
+    marketData: Record<string, number>;
+  }> {
+    const [signals, marketData] = await Promise.all([
+      this.signalsQueue.getJobCounts('wait', 'active', 'delayed', 'failed', 'completed'),
+      this.marketDataQueue.getJobCounts('wait', 'active', 'delayed', 'failed', 'completed'),
+    ]);
+
+    return { ok: true, signals, marketData };
+  }
+
+  @Get('arbitrage')
+  arbitrage(): {
+    ok: true;
+    lastScanAt: number | null;
+    opportunities: number;
+    staleSnapshots: number;
+  } {
+    const health = this.arbitrageScannerService.getHealth();
+    return { ok: true, ...health };
   }
 }

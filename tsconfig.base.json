@@ -17,7 +17,8 @@
       "@libs/binance": ["libs/binance/src/index"],
       "@libs/signals": ["libs/signals/src/index"],
       "@libs/telegram": ["libs/telegram/src/index"],
-      "@libs/core": ["libs/core/src/index"]
+      "@libs/core": ["libs/core/src/index"],
+      "@libs/market-data": ["libs/market-data/src/index"]
     }
   }
 }

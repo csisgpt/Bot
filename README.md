@@ -13,6 +13,9 @@ Signals bot for Binance Spot data that generates trading alerts and sends them t
 
 - `apps/api`: API + admin test endpoint.
 - `apps/worker`: Cron worker that fetches candles, generates signals, and queues Telegram notifications.
+- `apps/worker/src/market-data-v3`: Multi-provider market data ingest + normalization.
+- `apps/worker/src/arbitrage`: Arbitrage scanner (cross-exchange spread).
+- `apps/worker/src/news`: News fetcher (Binance/Bybit/OKX announcements).
 - `libs/*`: shared Binance client, signal strategies, Telegram integration, and core utilities.
 - Prisma + Postgres for persistence.
 - BullMQ + Redis for background jobs.
@@ -91,6 +94,80 @@ Required Telegram config:
 Binance WebSocket is used for real-time pricing and Redis caches the latest values. If the WS feed is unavailable, the worker falls back to Binance REST.
 
 **Note:** This is a high-frequency test mode and will post every 10 seconds without anti-spam.
+
+### Multi-provider market data (PR3)
+
+Enable the multi-provider WS ingest (Binance/Bybit/OKX) via env:
+
+```bash
+PROVIDERS_ENABLED=binance,bybit,okx
+MARKET_DATA_INGEST_ENABLED=true
+MARKET_DATA_TIMEFRAMES=1m
+```
+
+WebSocket/REST endpoints:
+
+```bash
+BINANCE_WS_URL=wss://stream.binance.com:9443/stream
+BYBIT_WS_URL=wss://stream.bybit.com/v5/public/spot
+BYBIT_REST_URL=https://api.bybit.com
+OKX_REST_URL=https://www.okx.com
+OKX_WS_ENABLED=false
+```
+
+KCEX is scaffolded but disabled by default because official docs are not reliable yet. Enable only when endpoints are confirmed:
+
+```bash
+KCEX_ENABLE=false
+KCEX_REST_URL=
+KCEX_WS_URL=
+```
+
+Redis keys written by the ingest worker:
+
+- `latest:ticker:{canonicalSymbol}:{provider}` -> JSON (last/bid/ask/ts)
+- `latest:book:{canonicalSymbol}:{provider}` -> JSON (bid/ask/ts)
+
+### Arbitrage scanner
+
+Enable the arbitrage engine:
+
+```bash
+ARB_ENABLED=true
+ARB_SCAN_INTERVAL_SECONDS=5
+ARB_MIN_SPREAD_PCT=0.2
+ARB_MIN_NET_PCT=0.05
+```
+
+The cross-exchange spread strategy reads the latest bid/ask snapshots from Redis and stores opportunities in Postgres (`ArbOpportunity`). Deduplication is done per minute bucket and symbol+pair cooldown.
+
+### News fetcher
+
+Enable the news worker:
+
+```bash
+NEWS_ENABLED=true
+NEWS_FETCH_INTERVAL_MINUTES=5
+NEWS_BINANCE_URL=https://www.binance.com/en/support/announcement
+NEWS_BYBIT_URL=https://www.bybit.com/en/announcement-info
+NEWS_OKX_URL=https://www.okx.com/support/hc/en-us/categories/360000030652
+```
+
+News items are normalized and stored in Postgres (`News`) with deduplication by `hash`.
+
+### Running workers locally
+
+Start the worker with the multi-provider ingest + arbitrage + news enabled:
+
+```bash
+pnpm dev:worker
+```
+
+Health endpoints:
+
+- `GET /health/providers` (provider connections)
+- `GET /health/queues` (queue depth)
+- `GET /health/arbitrage` (last scan + stale counts)
 
 ### Assets and instruments
 
