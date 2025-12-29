@@ -27,24 +27,23 @@ export class MessageFormatterService {
   }
 
   formatNews(news: News): string {
-    const lines = [
+    const lines: string[] = [
       '📰 <b>خبر جدید</b>',
       `<b>عنوان:</b> ${escapeHtml(news.title)}`,
       `<b>منبع:</b> ${escapeHtml(news.provider)}`,
       `<b>دسته‌بندی:</b> ${escapeHtml(news.category)}`,
-      lines.push(`<b>برچسب‌ها:</b> ${escapeHtml(news.tags.join('، '))}`);
-      `<b>زمان:</b> ${escapeHtml(news.ts.toISOString())}`,
     ];
 
-    if (news.tags?.length) {
+    if (Array.isArray(news.tags) && news.tags.length > 0) {
       lines.push(`<b>برچسب‌ها:</b> ${escapeHtml(news.tags.join('، '))}`);
-ها:</b> ${escapeHtml(news.tags.join('، '))}`);
     }
 
+    lines.push(`<b>زمان:</b> ${escapeHtml(news.ts.toISOString())}`);
     lines.push(`<b>لینک:</b> ${escapeHtml(news.url)}`);
 
     return lines.join('\n');
   }
+
 
   formatArbitrage(arb: ArbOpportunity): string {
     const lines = [

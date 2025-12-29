@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullModule } from '@nestjs/bullmq';
-import { CoreModule, createRedisConnection, SIGNALS_QUEUE_NAME } from '@libs/core';
+import {
+  CoreModule, createRedisConnection, SIGNALS_QUEUE_NAME,
+  MARKET_DATA_QUEUE_NAME,
+} from '@libs/core';
 import { BinanceModule } from '@libs/binance';
 import { SignalsModule } from '@libs/signals';
 import { TelegramModule } from '@libs/telegram';
@@ -20,6 +23,8 @@ import { ArbitrageModule } from './arbitrage/arbitrage.module';
 import { NewsModule } from './news/news.module';
 import { MarketDataProcessor } from './queues/market-data.processor';
 import { NotificationsModule } from './notifications/notifications.module';
+import { MarketDataModule as WorkerMarketDataModule } from './market-data/market-data.module';
+import { MarketDataModule as ProvidersMarketDataModule } from '@libs/market-data';
 
 @Module({
   imports: [
@@ -27,7 +32,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     BinanceModule,
     SignalsModule,
     TelegramModule,
-    MarketDataModule,
+    WorkerMarketDataModule,
+    ProvidersMarketDataModule,
     SignalsEngineModule,
     MarketDataV3Module,
     ArbitrageModule,
@@ -42,7 +48,7 @@ import { NotificationsModule } from './notifications/notifications.module';
       }),
     }),
     BullModule.registerQueue({ name: SIGNALS_QUEUE_NAME }),
-  ],
+    BullModule.registerQueue({ name: MARKET_DATA_QUEUE_NAME }),],
   controllers: [HealthController],
   providers: [
     SignalsCron,
@@ -54,4 +60,4 @@ import { NotificationsModule } from './notifications/notifications.module';
     TradingViewEmailIngestService,
   ],
 })
-export class WorkerModule {}
+export class WorkerModule { }

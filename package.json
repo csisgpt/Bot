@@ -49,6 +49,7 @@
   "devDependencies": {
     "@nestjs/cli": "^10.3.2",
     "@types/express": "^5.0.6",
+    "@types/luxon": "^3.7.1",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^20.12.12",
     "@types/ws": "^8.18.1",

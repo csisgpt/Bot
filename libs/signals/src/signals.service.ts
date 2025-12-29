@@ -6,9 +6,9 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class SignalsService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly prismaService: PrismaService) { }
 
-  async storeSignal(signal: Signal): Promise<Signal> {
+  async storeSignal(signal: Signal): Promise<Signal & { id: string }> {
     const created = await this.prismaService.signal.create({
       data: {
         source: signal.source ?? 'BINANCE',

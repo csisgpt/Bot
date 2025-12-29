@@ -12,6 +12,7 @@ import { Queue } from 'bullmq';
 import { MARKET_DATA_QUEUE_NAME } from '@libs/core';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ActiveSymbolsService } from './active-symbols.service';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
@@ -128,7 +129,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
         close: candle.close,
         volume: candle.volume,
         isFinal: candle.isFinal,
-        rawPayload: candle,
+        rawPayload: candle as unknown as Prisma.InputJsonValue,
       },
       create: {
         provider: candle.provider,
@@ -141,7 +142,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
         close: candle.close,
         volume: candle.volume,
         isFinal: candle.isFinal,
-        rawPayload: candle,
+        rawPayload: candle as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -161,7 +162,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
           low: candle.low,
           close: candle.close,
           volume: candle.volume,
-          rawPayload: candle,
+          rawPayload: candle as unknown as Prisma.InputJsonValue,
         },
         create: {
           source: 'BINANCE',
@@ -174,7 +175,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
           low: candle.low,
           close: candle.close,
           volume: candle.volume,
-          rawPayload: candle,
+          rawPayload: candle as unknown as Prisma.InputJsonValue,
         },
       });
     }

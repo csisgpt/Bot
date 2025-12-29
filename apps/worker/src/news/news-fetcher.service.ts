@@ -6,6 +6,7 @@ import { BinanceNewsProvider } from './providers/binance-news.provider';
 import { BybitNewsProvider } from './providers/bybit-news.provider';
 import { OkxNewsProvider } from './providers/okx-news.provider';
 import { NotificationOrchestratorService } from '../notifications/notification-orchestrator.service';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
@@ -100,7 +101,7 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
             category: item.category,
             tags: item.tags,
             hash: item.hash,
-            rawPayload: item,
+            rawPayload: item as unknown as Prisma.InputJsonValue,
           },
         });
         storedCount += 1;

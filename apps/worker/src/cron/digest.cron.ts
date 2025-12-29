@@ -99,10 +99,12 @@ export class DigestCron {
     );
 
     const topRefs = refs.slice(0, 5);
-    const lines = ['🧾 خلاصه اعلان‌ها'];
+
+    const lines: string[] = [
+      '🧾 خلاصه اعلان‌ها',
       `سیگنال‌ها: ${counts.SIGNAL ?? 0} | اخبار: ${counts.NEWS ?? 0} | آربیتراژ: ${counts.ARB ?? 0}`,
-
-
+    ];
+    
     const details: string[] = [];
     for (const item of topRefs) {
       if (item.entityType === 'SIGNAL') {

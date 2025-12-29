@@ -362,12 +362,16 @@ export class SignalsEngineService implements OnModuleInit, OnModuleDestroy {
   }
 
   private getDefaultSignalTimeframes(): string[] {
-    const value = this.configService.get<string>('DEFAULT_SIGNAL_TIMEFRAMES', '');
-    return value
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const raw = this.configService.get<unknown>('DEFAULT_SIGNAL_TIMEFRAMES', ['5m', '15m']);
+
+    const list =
+      Array.isArray(raw) ? raw.map(String) :
+      typeof raw === 'string' ? raw.split(',') :
+      [];
+
+    return list.map((x) => x.trim()).filter(Boolean);
   }
+
 
   private async runWithConcurrency<T>(
     items: T[],

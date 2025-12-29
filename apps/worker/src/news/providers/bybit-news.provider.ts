@@ -12,7 +12,7 @@ export class BybitNewsProvider implements NewsProvider {
   private readonly retryBaseDelayMs: number;
 
   constructor(private readonly configService: ConfigService) {
-    this.baseUrl = configService.get<string>('NEWS_BYBIT_URL');
+    this.baseUrl = configService.getOrThrow<string>('NEWS_BYBIT_URL');
     this.http = createNewsHttp(this.baseUrl, configService.get<number>('NEWS_HTTP_TIMEOUT_MS', 10000));
     this.retryAttempts = configService.get<number>('NEWS_RETRY_ATTEMPTS', 3);
     this.retryBaseDelayMs = configService.get<number>('NEWS_RETRY_BASE_DELAY_MS', 500);
