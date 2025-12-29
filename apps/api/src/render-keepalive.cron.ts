@@ -10,11 +10,10 @@ export class RenderKeepAliveCron {
 
   // هر 10 دقیقه (کمتر از 15 دقیقه inactivity رندر)
   @Cron('*/10 * * * *')
-  async ping() {
-    const enabled = this.config.get<string>('RENDER_KEEPALIVE_ENABLED') === 'true';
+  async ping() {;
     const url = this.config.get<string>('RENDER_KEEPALIVE_URL');
+    const enabled = this.config.get<boolean>('RENDER_KEEPALIVE_ENABLED') === true;
     if (!enabled || !url) return;
-
     try {
       const u = new URL(url);
       u.searchParams.set('ts', String(Date.now())); // جلوگیری از cache
