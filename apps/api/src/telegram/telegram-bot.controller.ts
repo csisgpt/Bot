@@ -16,8 +16,15 @@ export class TelegramBotController {
     @Headers('x-telegram-webhook-secret') legacySecret?: string,
   ): Promise<{ ok: true }> {
     const secret = this.configService.get<string>('TELEGRAM_WEBHOOK_SECRET', '');
-    const provided = apiSecret ?? legacySecret;
-    if (!secret || provided !== secret) {
+    const providedSecrets = [apiSecret, legacySecret].filter(
+      (value): value is string => Boolean(value),
+    );
+
+    if (!secret || providedSecrets.length === 0) {
+      throw new UnauthorizedException();
+    }
+
+    if (providedSecrets.some((value) => value !== secret)) {
       throw new UnauthorizedException();
     }
 

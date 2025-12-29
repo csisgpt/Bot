@@ -60,12 +60,16 @@ if ! is_true "$RUN_API" && ! is_true "$RUN_WORKER"; then
 fi
 
 # migrations (اختیاری)
+if is_true "$MIGRATE_ON_START" && ! is_true "$RUN_API"; then
+  echo "Migrations are enabled but RUN_API is false; skipping migrate deploy."
+fi
+
 if is_true "$RUN_API" && is_true "$MIGRATE_ON_START"; then
-  if [ -x "./scripts/migrate-deploy.sh" ]; then
-    echo "Running prisma migrations..."
-    ./scripts/migrate-deploy.sh
+  if [ -f "./scripts/migrate-deploy.sh" ]; then
+    echo "Running prisma migrations (API only)..."
+    sh ./scripts/migrate-deploy.sh
   else
-    echo "WARNING: ./scripts/migrate-deploy.sh not found or not executable. Skipping migrations."
+    echo "WARNING: ./scripts/migrate-deploy.sh not found. Skipping migrations."
   fi
 fi
 

@@ -37,7 +37,8 @@ export class MessageFormatterService {
     ];
 
     if (news.tags?.length) {
-      lines.push(`<b>برچسبها:</b> ${escapeHtml(news.tags.join('، '))}`);
+      lines.push(`<b>برچسب‌ها:</b> ${escapeHtml(news.tags.join('، '))}`);
+ها:</b> ${escapeHtml(news.tags.join('، '))}`);
     }
 
     lines.push(`<b>لینک:</b> ${escapeHtml(news.url)}`);
