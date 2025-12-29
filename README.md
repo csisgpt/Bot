@@ -257,6 +257,17 @@ Chat configuration is stored per chat (`ChatConfig`) and drives:
 
 If a chat has no overrides, env defaults are used instead.
 
+### Notification modes (PR4.1)
+
+Per-chat notification modes:
+
+- `NORMAL`: تعادل معمولی
+- `FOCUS`: سخت‌گیرانه‌تر
+- `SLEEP`: بسیار سخت‌گیرانه
+- `SCALP`: آزادتر ولی با سقف ساعتی پایین
+
+Quiet hours are evaluated in `APP_TIMEZONE` (default: `Europe/Berlin`).
+
 ### TradingView webhook (paid plan)
 
 1. Set `TRADINGVIEW_WEBHOOK_ENABLED=true`.

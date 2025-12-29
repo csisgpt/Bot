@@ -61,8 +61,7 @@ describe('TradingView ingest', () => {
 
   it('fills missing price via price provider', async () => {
     const storeSignal = vi.fn(async (signal: Signal) => signal);
-    const addQueue = vi.fn();
-    const chatConfigFindMany = vi.fn().mockResolvedValue([]);
+    const handleSignalCreated = vi.fn();
     const processor = new TradingViewIngestProcessor(
       {
         get: (key: string, fallback?: string) => {
@@ -84,8 +83,8 @@ describe('TradingView ingest', () => {
           getCandles: async () => [{ close: 2000 }],
         }),
       } as never,
-      { chatConfig: { findMany: chatConfigFindMany } } as never,
-      { add: addQueue } as never,
+      { signal: { findUnique: vi.fn() } } as never,
+      { handleSignalCreated } as never,
     );
 
     await processor.process({
@@ -95,7 +94,7 @@ describe('TradingView ingest', () => {
 
     const storedSignal = storeSignal.mock.calls[0][0] as Signal;
     expect(storedSignal.price).toBe(2000);
-    expect(addQueue).toHaveBeenCalled();
+    expect(handleSignalCreated).toHaveBeenCalled();
   });
 
   it('keeps price null when missing and no fallback', () => {

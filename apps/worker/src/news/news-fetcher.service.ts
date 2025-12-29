@@ -5,6 +5,7 @@ import { NewsProvider, NewsItem } from '@libs/market-data';
 import { BinanceNewsProvider } from './providers/binance-news.provider';
 import { BybitNewsProvider } from './providers/bybit-news.provider';
 import { OkxNewsProvider } from './providers/okx-news.provider';
+import { NotificationOrchestratorService } from '../notifications/notification-orchestrator.service';
 
 @Injectable()
 export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
@@ -20,6 +21,7 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly prismaService: PrismaService,
+    private readonly notificationOrchestrator: NotificationOrchestratorService,
   ) {
     this.enabled = configService.get<boolean>('NEWS_ENABLED', true);
     this.intervalMs =
@@ -86,22 +88,46 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
     if (!items.length) {
       return 0;
     }
-    const result = await this.prismaService.news.createMany({
-      data: items.map((item) => ({
-        provider: item.provider,
-        ts: new Date(item.ts),
-        title: item.title,
-        url: item.url,
-        category: item.category,
-        tags: item.tags,
-        hash: item.hash,
-        rawPayload: item,
-      })),
-      skipDuplicates: true,
-    });
-    const storedCount = result.count ?? items.length;
-    this.logger.log(`خبرهای جدید ذخیره شد: ${storedCount}`);
+    let storedCount = 0;
+    for (const item of items) {
+      try {
+        const record = await this.prismaService.news.create({
+          data: {
+            provider: item.provider,
+            ts: new Date(item.ts),
+            title: item.title,
+            url: item.url,
+            category: item.category,
+            tags: item.tags,
+            hash: item.hash,
+            rawPayload: item,
+          },
+        });
+        storedCount += 1;
+        await this.notificationOrchestrator.handleNewsCreated(record.id);
+      } catch (error) {
+        if (this.isUniqueViolation(error)) {
+          continue;
+        }
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.warn(JSON.stringify({ event: 'news_store_failed', message }));
+      }
+    }
+
+    if (storedCount > 0) {
+      this.logger.log(`خبرهای جدید ذخیره شد: ${storedCount}`);
+    }
+
     return storedCount;
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: string }).code === 'P2002'
+    );
   }
 
   getHealth(): {

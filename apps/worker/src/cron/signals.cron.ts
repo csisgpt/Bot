@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { ChatConfig } from '@prisma/client';
 import {
   atr,
@@ -14,7 +12,8 @@ import {
   SignalsService,
   StrategyRegistry,
 } from '@libs/signals';
-import { PrismaService, SIGNALS_QUEUE_NAME } from '@libs/core';
+import { PrismaService } from '@libs/core';
+import { NotificationOrchestratorService } from '../notifications/notification-orchestrator.service';
 
 interface MonitoringEntry {
   assetType: AssetType;
@@ -34,7 +33,7 @@ export class SignalsCron {
     private readonly feedRegistry: FeedRegistry,
     private readonly strategyRegistry: StrategyRegistry,
     private readonly prismaService: PrismaService,
-    @InjectQueue(SIGNALS_QUEUE_NAME) private readonly signalsQueue: Queue,
+    private readonly notificationOrchestrator: NotificationOrchestratorService,
   ) {}
 
   @Cron('*/1 * * * *')
@@ -120,7 +119,7 @@ export class SignalsCron {
         if (!allowed) continue;
 
         const storedSignal = await this.signalsService.storeSignal(signal);
-        await this.dispatchSignalToChats(storedSignal, entryChats);
+        await this.notificationOrchestrator.handleSignalCreated(storedSignal.id);
       }
     }
   }
@@ -255,111 +254,6 @@ export class SignalsCron {
     return Array.from(plan.values());
   }
 
-  private async dispatchSignalToChats(signal: Signal, chatConfigs: ChatConfig[]): Promise<void> {
-    const now = new Date();
-    const fallbackChannelId = this.configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '');
-    const fallbackGroupId = this.configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '');
-
-    const destinations = new Set<string>();
-
-    // If no ChatConfig matched, fallback to env channel/group
-    if (chatConfigs.length === 0) {
-      if (fallbackChannelId) destinations.add(fallbackChannelId);
-      if (fallbackGroupId) destinations.add(fallbackGroupId);
-    } else {
-      for (const chatConfig of chatConfigs) {
-        if (!this.isSignalAllowedForChat(signal, chatConfig, now)) continue;
-
-        if (chatConfig.chatType === 'group') {
-          if (chatConfig.sendToGroup) destinations.add(chatConfig.chatId);
-          if (chatConfig.sendToChannel && fallbackChannelId) destinations.add(fallbackChannelId);
-          continue;
-        }
-
-        if (chatConfig.chatType === 'channel') {
-          if (chatConfig.sendToChannel) destinations.add(chatConfig.chatId);
-          continue;
-        }
-
-        // private chat
-        destinations.add(chatConfig.chatId);
-      }
-    }
-
-    if (destinations.size === 0) {
-      this.logger.warn(
-        `No Telegram destinations for signal ${signal.instrument} ${signal.interval} ${signal.side}.`,
-      );
-      return;
-    }
-
-    for (const chatId of destinations) {
-      await this.signalsQueue.add(
-        'sendTelegramSignal',
-        { chatId, signal },
-        {
-          removeOnComplete: true,
-          removeOnFail: { count: 50 },
-        },
-      );
-    }
-  }
-
-  private isSignalAllowedForChat(signal: Signal, chatConfig: ChatConfig, now: Date): boolean {
-    const assetsEnabled = (chatConfig.assetsEnabled ?? []).map((asset) => asset.toUpperCase());
-    if (assetsEnabled.length > 0 && !assetsEnabled.includes(signal.assetType.toUpperCase())) {
-      return false;
-    }
-
-    const timeframes = (chatConfig.timeframes ?? []).map((frame) => frame.toLowerCase());
-    if (timeframes.length > 0 && !timeframes.includes(signal.interval.toLowerCase())) {
-      return false;
-    }
-
-    const watchlist = (chatConfig.watchlist ?? []).map((item) => item.toUpperCase());
-    if (watchlist.length > 0 && !watchlist.includes(signal.instrument.toUpperCase())) {
-      return false;
-    }
-
-    if (signal.confidence < chatConfig.minConfidence) return false;
-
-    // mute logic
-    if (chatConfig.mutedUntil && now < chatConfig.mutedUntil) {
-      if (chatConfig.mutedInstruments.length === 0) return false;
-      if (chatConfig.mutedInstruments.includes(signal.instrument)) return false;
-    }
-
-    // quiet hours (UTC)
-    if (chatConfig.quietHoursEnabled) {
-      const inQuiet = this.isInQuietHours(now, chatConfig.quietHoursStart, chatConfig.quietHoursEnd);
-      if (inQuiet) return false;
-    }
-
-    return true;
-  }
-
-  private isInQuietHours(now: Date, start?: string | null, end?: string | null): boolean {
-    if (!start || !end) return false;
-
-    const [startH, startM] = start.split(':').map(Number);
-    const [endH, endM] = end.split(':').map(Number);
-    if ([startH, startM, endH, endM].some((v) => Number.isNaN(v))) return false;
-
-    const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-
-    // if equal, treat as disabled
-    if (startMinutes === endMinutes) return false;
-
-    // normal range
-    if (startMinutes < endMinutes) {
-      return minutes >= startMinutes && minutes < endMinutes;
-    }
-
-    // overnight range
-    return minutes >= startMinutes || minutes < endMinutes;
-  }
 
   /**
    * Adds SL/TP levels based on ATR, but ONLY if:

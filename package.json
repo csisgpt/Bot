@@ -37,6 +37,7 @@
     "express": "^5.2.1",
     "imapflow": "^1.0.192",
     "ioredis": "^5.4.1",
+    "luxon": "^3.7.2",
     "mailparser": "^3.7.1",
     "prisma": "^5.13.0",
     "reflect-metadata": "^0.1.13",

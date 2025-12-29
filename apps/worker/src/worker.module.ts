@@ -19,6 +19,7 @@ import { MarketDataV3Module } from './market-data-v3/market-data-v3.module';
 import { ArbitrageModule } from './arbitrage/arbitrage.module';
 import { NewsModule } from './news/news.module';
 import { MarketDataProcessor } from './queues/market-data.processor';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { MarketDataProcessor } from './queues/market-data.processor';
     MarketDataV3Module,
     ArbitrageModule,
     NewsModule,
+    NotificationsModule,
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [CoreModule],

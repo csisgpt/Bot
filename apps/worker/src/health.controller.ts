@@ -9,6 +9,7 @@ import { Queue } from 'bullmq';
 import { ArbitrageScannerService } from './arbitrage/arbitrage-scanner.service';
 import { ActiveSymbolsService } from './market-data-v3/active-symbols.service';
 import { NewsFetcherService } from './news/news-fetcher.service';
+import { NotificationOrchestratorService } from './notifications/notification-orchestrator.service';
 
 @Controller('health')
 export class HealthController {
@@ -21,6 +22,7 @@ export class HealthController {
     private readonly arbitrageScannerService: ArbitrageScannerService,
     private readonly activeSymbolsService: ActiveSymbolsService,
     private readonly newsFetcherService: NewsFetcherService,
+    private readonly notificationOrchestrator: NotificationOrchestratorService,
     @InjectQueue(SIGNALS_QUEUE_NAME)
     private readonly signalsQueue: Queue,
     @InjectQueue(MARKET_DATA_QUEUE_NAME)
@@ -187,5 +189,27 @@ export class HealthController {
   } {
     const health = this.newsFetcherService.getHealth();
     return { ok: true, ...health };
+  }
+
+  @Get('notifications')
+  async notifications(): Promise<{
+    ok: true;
+    orchestratorEnabled: boolean;
+    queue: Record<string, number>;
+    lastProcessedAt: number | null;
+    statsLastMinutes: { sent: number; skipped: number };
+  }> {
+    const [queue, health] = await Promise.all([
+      this.signalsQueue.getJobCounts('wait', 'active', 'delayed', 'failed', 'completed'),
+      this.notificationOrchestrator.getHealthSnapshot(),
+    ]);
+
+    return {
+      ok: true,
+      orchestratorEnabled: health.orchestratorEnabled,
+      queue,
+      lastProcessedAt: health.lastProcessedAt,
+      statsLastMinutes: health.statsLastMinutes,
+    };
   }
 }

@@ -48,7 +48,7 @@ export const createEmaRsiStrategy = (config: EmaRsiConfig): Strategy => ({
         reason: `EMA${config.emaFastPeriod} بالای EMA${config.emaSlowPeriod} کراس کرد و RSI برابر ${currRsi.toFixed(
           2,
         )} بود.`,
-        why: 'EMA سریع بالای EMA کند قرار گرفت و RSI زیر ناحیه\u000cی اشباع خرید باقی ماند.',
+        why: 'EMA سریع بالای EMA کند قرار گرفت و RSI زیر ناحیه\u200cی اشباع خرید باقی ماند.',
         indicators: {
           emaFast: currFast,
           emaSlow: currSlow,
@@ -73,7 +73,7 @@ export const createEmaRsiStrategy = (config: EmaRsiConfig): Strategy => ({
         reason: `EMA${config.emaFastPeriod} پایین EMA${config.emaSlowPeriod} کراس کرد و RSI برابر ${currRsi.toFixed(
           2,
         )} بود.`,
-        why: 'EMA سریع زیر EMA کند قرار گرفت و RSI بالای ناحیه\u000cی اشباع فروش باقی ماند.',
+        why: 'EMA سریع زیر EMA کند قرار گرفت و RSI بالای ناحیه\u200cی اشباع فروش باقی ماند.',
         indicators: {
           emaFast: currFast,
           emaSlow: currSlow,

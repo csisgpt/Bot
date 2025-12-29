@@ -46,6 +46,7 @@ const envObject = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("production"),
     APP_NAME: z.string().trim().default("crypto-signals-bot"),
     TZ: z.string().trim().default("UTC"),
+    APP_TIMEZONE: z.string().trim().default("Europe/Berlin"),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
     PORT: toInt(3000).pipe(z.number().int().min(1).max(65535)),
@@ -63,6 +64,21 @@ const envObject = z
     QUEUE_CONCURRENCY: toInt(5).pipe(z.number().int().min(1).max(200)),
     QUEUE_MARKET_DATA_NAME: z.string().trim().default("market-data"),
     QUEUE_NEWS_NAME: z.string().trim().default("news"),
+
+    NOTIFICATION_ORCHESTRATOR_ENABLED: toBool(true).default(true),
+    NOTIF_MODE_DEFAULT: z.string().trim().default("NORMAL"),
+    NOTIF_MAX_PER_HOUR_DEFAULT: toInt(12).pipe(z.number().int().min(1).max(1000)),
+    NOTIF_QUIET_HOURS_DEFAULT_ENABLED: toBool(true).default(true),
+    NOTIF_QUIET_HOURS_DEFAULT_START: z.string().trim().default("23:00"),
+    NOTIF_QUIET_HOURS_DEFAULT_END: z.string().trim().default("08:00"),
+    NOTIF_COOLDOWN_SIGNALS_DEFAULT: toInt(600).pipe(z.number().int().min(0).max(86400)),
+    NOTIF_COOLDOWN_NEWS_DEFAULT: toInt(1800).pipe(z.number().int().min(0).max(86400)),
+    NOTIF_COOLDOWN_ARB_DEFAULT: toInt(300).pipe(z.number().int().min(0).max(86400)),
+    NOTIF_MIN_CONFIDENCE_DEFAULT: toInt(60).pipe(z.number().int().min(0).max(100)),
+    NOTIF_DIGEST_ENABLED_DEFAULT: toBool(false).default(false),
+    NOTIF_DIGEST_TIMES_DEFAULT: csv([]).default([]),
+
+    LEGACY_SIGNAL_DELIVERY_LOG_ENABLED: toBool(false).default(false),
 
     SIGNALS_TELEGRAM_JOB_ATTEMPTS: toInt(5).pipe(z.number().int().min(1).max(50)),
     SIGNALS_TELEGRAM_JOB_BACKOFF_DELAY_MS: toInt(3000).pipe(z.number().int().min(0).max(60_000)),

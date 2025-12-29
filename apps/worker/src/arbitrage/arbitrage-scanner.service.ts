@@ -11,6 +11,7 @@ import {
   ArbitrageSnapshot,
   Ticker,
 } from '@libs/market-data';
+import { NotificationOrchestratorService } from '../notifications/notification-orchestrator.service';
 
 @Injectable()
 export class ArbitrageScannerService implements OnModuleInit, OnModuleDestroy {
@@ -31,6 +32,7 @@ export class ArbitrageScannerService implements OnModuleInit, OnModuleDestroy {
     private readonly redisService: RedisService,
     private readonly prismaService: PrismaService,
     private readonly instrumentRegistry: InstrumentRegistryService,
+    private readonly notificationOrchestrator: NotificationOrchestratorService,
   ) {
     this.enabled = configService.get<boolean>('ARB_ENABLED', true);
     this.scanIntervalMs =
@@ -122,17 +124,8 @@ export class ArbitrageScannerService implements OnModuleInit, OnModuleDestroy {
 
       opportunity.dedupKey = dedupKey;
       try {
-        await this.prismaService.arbOpportunity.upsert({
-          where: { dedupKey },
-          update: {
-            ts: new Date(opportunity.ts),
-            spreadAbs: opportunity.spreadAbs,
-            spreadPct: opportunity.spreadPct,
-            netPct: opportunity.netPct,
-            confidence: opportunity.confidence,
-            reason: opportunity.reason,
-          },
-          create: {
+        const record = await this.prismaService.arbOpportunity.create({
+          data: {
             canonicalSymbol: opportunity.canonicalSymbol,
             ts: new Date(opportunity.ts),
             kind: opportunity.kind,
@@ -149,7 +142,11 @@ export class ArbitrageScannerService implements OnModuleInit, OnModuleDestroy {
           },
         });
         saved += 1;
+        await this.notificationOrchestrator.handleArbCreated(record.id);
       } catch (error) {
+        if (this.isUniqueViolation(error)) {
+          continue;
+        }
         const message = error instanceof Error ? error.message : 'Unknown error';
         this.logger.warn(
           JSON.stringify({ event: 'arb_store_failed', message, dedupKey }),
@@ -229,5 +226,14 @@ export class ArbitrageScannerService implements OnModuleInit, OnModuleDestroy {
     sellExchange: string;
   }): string {
     return `${opportunity.kind}:${opportunity.canonicalSymbol}:${opportunity.buyExchange}:${opportunity.sellExchange}`;
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: string }).code === 'P2002'
+    );
   }
 }
