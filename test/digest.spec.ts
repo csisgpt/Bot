@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NotificationOrchestratorService } from '../apps/worker/src/notifications/notification-orchestrator.service';
-import { DigestCron } from '../apps/worker/src/cron/digest.cron';
+import { truncateDigestMessage } from '../apps/worker/src/cron/digest.utils';
 
 const buildOrchestratorWithRedis = (redisService: any) => {
   const configService = {
@@ -51,15 +51,8 @@ describe('digest helpers', () => {
   });
 
   it('truncates long digest messages safely', () => {
-    const cron = new DigestCron(
-      {} as never,
-      {} as never,
-      { get: () => 'Europe/Berlin' } as never,
-      {} as never,
-    ) as any;
-
     const longMessage = `<b>خلاصه</b>${'الف'.repeat(5000)}`;
-    const truncated = cron.truncateDigestMessage(longMessage);
+    const truncated = truncateDigestMessage(longMessage);
 
     expect(truncated.length).toBeLessThanOrEqual(3800);
     expect(truncated.includes('<')).toBe(false);

@@ -35,7 +35,7 @@ export const createRsiThresholdStrategy = (config: RsiThresholdConfig): Strategy
         time: latest.closeTime,
         confidence: 66,
         tags: ['rsi', 'mean_reversion'],
-        reason: `RSI ${currRsi.toFixed(2)} پایین\u000cتر از آستانه خرید ${config.rsiBuyThreshold} است.`,
+        reason: `RSI ${currRsi.toFixed(2)} پایین\u200cتر از آستانه خرید ${config.rsiBuyThreshold} است.`,
         why: 'RSI وارد ناحیه اشباع فروش شده و احتمال بازگشت به میانگین وجود دارد.',
         indicators: {
           rsi: currRsi,

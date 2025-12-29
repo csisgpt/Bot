@@ -6,6 +6,7 @@ import { Queue } from 'bullmq';
 import { PrismaService, RedisService, SIGNALS_QUEUE_NAME } from '@libs/core';
 import { ChatConfig } from '@prisma/client';
 import { DateTime } from 'luxon';
+import { truncateDigestMessage } from './digest.utils';
 
 interface DigestItemRef {
   entityType: 'SIGNAL' | 'NEWS' | 'ARB';
@@ -29,7 +30,7 @@ export class DigestCron {
     const now = new Date();
     const timeZone = this.getTimeZone();
     const chatConfigs = await this.prismaService.chatConfig.findMany({
-      where: { isEnabled: true },
+      where: { isEnabled: true, digestEnabled: true },
     });
 
     if (chatConfigs.length === 0) {
@@ -77,9 +78,11 @@ export class DigestCron {
       return;
     }
 
+    const safeSummary = truncateDigestMessage(summary);
+
     await this.signalsQueue.add(
       'sendTelegramText',
-      { chatId: chatConfig.chatId, text: summary, parseMode: 'HTML' },
+      { chatId: chatConfig.chatId, text: safeSummary, parseMode: 'HTML' },
       { removeOnComplete: true, removeOnFail: { count: 50 } },
     );
 
@@ -96,12 +99,9 @@ export class DigestCron {
     );
 
     const topRefs = refs.slice(0, 5);
-    const lines = ['🧾 <b>خلاصه اعلان‌ها</b>'];
+    const lines = ['🧾 خلاصه اعلان‌ها'];
       `سیگنال‌ها: ${counts.SIGNAL ?? 0} | اخبار: ${counts.NEWS ?? 0} | آربیتراژ: ${counts.ARB ?? 0}`,
 
-    lines.push(
-      `سیگنالها: ${counts.SIGNAL ?? 0} | اخبار: ${counts.NEWS ?? 0} | آربیتراژ: ${counts.ARB ?? 0}`,
-    );
 
     const details: string[] = [];
     for (const item of topRefs) {

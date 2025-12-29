@@ -98,8 +98,8 @@ export class TelegramService {
         Markup.button.callback('🔔 ساخت هشدار', `sig:a:${signalId}`),
       ],
       [
-        Markup.button.callback('⭐ افزودن به واچ\u000cلیست', `sig:w:${signalId}`),
-        Markup.button.callback('🔕 بی\u000cصدا (۱ ساعت)', `sig:m:${signalId}`),
+        Markup.button.callback('⭐ افزودن به واچ\u200cلیست', `sig:w:${signalId}`),
+        Markup.button.callback('🔕 بی\u200cصدا (۱ ساعت)', `sig:m:${signalId}`),
       ],
     ]);
   }

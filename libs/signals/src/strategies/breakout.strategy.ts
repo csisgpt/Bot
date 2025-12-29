@@ -35,7 +35,7 @@ export const createBreakoutStrategy = (config: BreakoutConfig): Strategy => ({
         reason: `قیمت پایانی ${latest.close.toFixed(4)} از سقف ${config.lookback} کندل (${high.toFixed(
           4,
         )}) عبور کرد.`,
-        why: 'قیمت بالاتر از سقف اخیر بسته شد و مومنتوم بریک\u000cاوت را نشان می\u000cدهد.',
+        why: 'قیمت بالاتر از سقف اخیر بسته شد و مومنتوم بریک\u200cاوت را نشان می\u200cدهد.',
         indicators: {
           lookbackHigh: high,
           lookbackLow: low,
@@ -56,10 +56,10 @@ export const createBreakoutStrategy = (config: BreakoutConfig): Strategy => ({
         time: latest.closeTime,
         confidence: 72,
         tags: ['breakout', 'momentum'],
-        reason: `قیمت پایانی ${latest.close.toFixed(4)} پایین\u000cتر از کف ${config.lookback} کندل (${low.toFixed(
+        reason: `قیمت پایانی ${latest.close.toFixed(4)} پایین\u200cتر از کف ${config.lookback} کندل (${low.toFixed(
           4,
         )}) بسته شد.`,
-        why: 'قیمت پایین\u000cتر از کف اخیر بسته شد و مومنتوم نزولی را نشان می\u000cدهد.',
+        why: 'قیمت پایین\u200cتر از کف اخیر بسته شد و مومنتوم نزولی را نشان می\u200cدهد.',
         indicators: {
           lookbackHigh: high,
           lookbackLow: low,
