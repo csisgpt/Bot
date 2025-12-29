@@ -445,8 +445,8 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         await this.bot.telegram.sendMessage(chatId, this.escapeHtml(faMessages.signals.muteOptions), {
           parse_mode: this.parseMode,
           reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('بی\u000cصدا کردن این نماد (۱ ساعت)', `sig:m:${id}:instrument`)],
-            [Markup.button.callback('بی\u000cصدا کردن همه (۱ ساعت)', `sig:m:${id}:all`)],
+            [Markup.button.callback('بی\u200cصدا کردن این نماد (۱ ساعت)', `sig:m:${id}:instrument`)],
+            [Markup.button.callback('بی\u200cصدا کردن همه (۱ ساعت)', `sig:m:${id}:all`)],
           ]).reply_markup,
         });
         return;
@@ -666,13 +666,13 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     const assets =
       chatConfig.assetsEnabled.length > 0
         ? chatConfig.assetsEnabled.join(', ')
-        : 'پیش\u000cفرض';
+        : 'پیش\u200cفرض';
     const timeframes =
-      chatConfig.timeframes.length > 0 ? chatConfig.timeframes.join(', ') : 'پیش\u000cفرض';
+      chatConfig.timeframes.length > 0 ? chatConfig.timeframes.join(', ') : 'پیش\u200cفرض';
     const watchlist =
-      chatConfig.watchlist.length > 0 ? chatConfig.watchlist.join(', ') : 'پیش\u000cفرض';
+      chatConfig.watchlist.length > 0 ? chatConfig.watchlist.join(', ') : 'پیش\u200cفرض';
     const quiet = chatConfig.quietHoursEnabled
-      ? `${chatConfig.quietHoursStart ?? '??'}-${chatConfig.quietHoursEnd ?? '??'} UTC`
+      ? `${chatConfig.quietHoursStart ?? '??'}-${chatConfig.quietHoursEnd ?? '??'} (محلی)`
       : faMessages.toggles.off;
 
     return [

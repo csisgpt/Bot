@@ -22,6 +22,7 @@ const RATE_LIMIT_TTL_SECONDS = 2 * 60 * 60;
 const STATS_BUCKET_TTL_SECONDS = 60 * 60;
 const STATS_WINDOW_MINUTES = 15;
 const DIGEST_BUFFER_TTL_SECONDS = 60 * 60 * 48;
+const DIGEST_BUFFER_MAX_ITEMS = 200;
 
 @Injectable()
 export class NotificationOrchestratorService {
@@ -153,8 +154,7 @@ export class NotificationOrchestratorService {
       });
 
       if (baseDecision.action === 'DIGEST') {
-        await this.bufferDigest(entityType, entityId, targetChatId);
-        await this.deliveryRepository
+        const delivery = await this.deliveryRepository
           .createDelivery({
             entityType,
             entityId,
@@ -164,10 +164,13 @@ export class NotificationOrchestratorService {
           })
           .catch((error: unknown) => {
             if (this.isUniqueViolation(error)) {
-              return;
+              return null;
             }
             throw error;
           });
+        if (delivery) {
+          await this.bufferDigest(entityType, entityId, targetChatId);
+        }
         continue;
       }
 
@@ -177,10 +180,10 @@ export class NotificationOrchestratorService {
         continue;
       }
 
-      const rateLimitHit = await this.isRateLimited(targetChatId, preferences);
+      const rateLimitHit = await this.checkRateLimit(targetChatId, preferences);
       const cooldownHit = rateLimitHit
         ? false
-        : await this.isCooldownActive(targetChatId, entityType, entity, preferences);
+        : await this.checkCooldown(targetChatId, entityType, entity, preferences);
       const decision = evaluatePolicy({
         entityType,
         preferences,
@@ -216,6 +219,35 @@ export class NotificationOrchestratorService {
         });
 
       if (!delivery) {
+        continue;
+      }
+
+      const rateLimitCommitted = await this.commitRateLimit(targetChatId, preferences);
+      if (!rateLimitCommitted) {
+        await this.deliveryRepository.updateDeliveryStatus({
+          id: delivery.id,
+          status: 'SKIPPED',
+          reason: 'rate_limit',
+        });
+        this.bumpSkip(summary, 'rate_limit');
+        await this.trackStats('skipped');
+        continue;
+      }
+
+      const cooldownCommitted = await this.commitCooldown(
+        targetChatId,
+        entityType,
+        entity,
+        preferences,
+      );
+      if (!cooldownCommitted) {
+        await this.deliveryRepository.updateDeliveryStatus({
+          id: delivery.id,
+          status: 'SKIPPED',
+          reason: 'cooldown',
+        });
+        this.bumpSkip(summary, 'cooldown');
+        await this.trackStats('skipped');
         continue;
       }
 
@@ -346,21 +378,19 @@ export class NotificationOrchestratorService {
     };
   }
 
-  private async isRateLimited(chatId: string, preferences: ChatPreferences): Promise<boolean> {
+  private async checkRateLimit(chatId: string, preferences: ChatPreferences): Promise<boolean> {
     const modePreset = getModePreset(preferences.mode);
     const maxPerHour = modePreset.maxNotifsPerHour ?? preferences.maxNotifsPerHour;
     if (maxPerHour <= 0) return true;
 
     const key = `rl:chat:${chatId}:hour:${this.formatHourBucket(new Date())}`;
-    const count = await this.redisService.incr(key);
-    if (count === 1) {
-      await this.redisService.expire(key, RATE_LIMIT_TTL_SECONDS);
-    }
-
-    return count > maxPerHour;
+    const raw = await this.redisService.get(key);
+    if (!raw) return false;
+    const count = Number(raw);
+    return Number.isFinite(count) && count >= maxPerHour;
   }
 
-  private async isCooldownActive(
+  private async checkCooldown(
     chatId: string,
     entityType: NotificationEntityType,
     entity: SignalSnapshot | NewsSnapshot | ArbSnapshot,
@@ -368,9 +398,42 @@ export class NotificationOrchestratorService {
   ): Promise<boolean> {
     const { key, ttl } = this.buildCooldownKey(chatId, entityType, entity, preferences);
     if (!key || ttl <= 0) return false;
+    const exists = await this.redisService.exists(key);
+    return exists > 0;
+  }
 
+  private async commitRateLimit(chatId: string, preferences: ChatPreferences): Promise<boolean> {
+    const modePreset = getModePreset(preferences.mode);
+    const maxPerHour = modePreset.maxNotifsPerHour ?? preferences.maxNotifsPerHour;
+    if (maxPerHour <= 0) return false;
+
+    const key = `rl:chat:${chatId}:hour:${this.formatHourBucket(new Date())}`;
+    const script = [
+      'local current = redis.call(\"GET\", KEYS[1])',
+      'if current and tonumber(current) >= tonumber(ARGV[1]) then',
+      '  return 0',
+      'end',
+      'local next = redis.call(\"INCR\", KEYS[1])',
+      'if tonumber(next) == 1 then',
+      '  redis.call(\"EXPIRE\", KEYS[1], tonumber(ARGV[2]))',
+      'end',
+      'return 1',
+    ].join('\\n');
+
+    const allowed = await this.redisService.eval(script, 1, key, maxPerHour, RATE_LIMIT_TTL_SECONDS);
+    return Number(allowed) === 1;
+  }
+
+  private async commitCooldown(
+    chatId: string,
+    entityType: NotificationEntityType,
+    entity: SignalSnapshot | NewsSnapshot | ArbSnapshot,
+    preferences: ChatPreferences,
+  ): Promise<boolean> {
+    const { key, ttl } = this.buildCooldownKey(chatId, entityType, entity, preferences);
+    if (!key || ttl <= 0) return true;
     const result = await this.redisService.set(key, '1', 'EX', ttl, 'NX');
-    return result !== 'OK';
+    return result === 'OK';
   }
 
   private buildCooldownKey(
@@ -490,6 +553,7 @@ export class NotificationOrchestratorService {
       createdAt: new Date().toISOString(),
     });
     await this.redisService.rpush(key, payload);
+    await this.redisService.ltrim(key, -DIGEST_BUFFER_MAX_ITEMS, -1);
     await this.redisService.expire(key, DIGEST_BUFFER_TTL_SECONDS);
   }
 

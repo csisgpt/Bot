@@ -96,7 +96,8 @@ export class DigestCron {
     );
 
     const topRefs = refs.slice(0, 5);
-    const lines = ['🧾 <b>خلاصه اعلانها</b>'];
+    const lines = ['🧾 <b>خلاصه اعلان‌ها</b>'];
+      `سیگنال‌ها: ${counts.SIGNAL ?? 0} | اخبار: ${counts.NEWS ?? 0} | آربیتراژ: ${counts.ARB ?? 0}`,
 
     lines.push(
       `سیگنالها: ${counts.SIGNAL ?? 0} | اخبار: ${counts.NEWS ?? 0} | آربیتراژ: ${counts.ARB ?? 0}`,

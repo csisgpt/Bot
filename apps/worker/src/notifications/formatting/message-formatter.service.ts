@@ -31,7 +31,8 @@ export class MessageFormatterService {
       '📰 <b>خبر جدید</b>',
       `<b>عنوان:</b> ${escapeHtml(news.title)}`,
       `<b>منبع:</b> ${escapeHtml(news.provider)}`,
-      `<b>دستهبندی:</b> ${escapeHtml(news.category)}`,
+      `<b>دسته‌بندی:</b> ${escapeHtml(news.category)}`,
+      lines.push(`<b>برچسب‌ها:</b> ${escapeHtml(news.tags.join('، '))}`);
       `<b>زمان:</b> ${escapeHtml(news.ts.toISOString())}`,
     ];
 

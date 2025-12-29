@@ -20,7 +20,7 @@ const formatIndicatorValue = (value: unknown): string => {
 
 const formatStrategyLabel = (strategy: string): string => {
   const map: Record<string, string> = {
-    breakout: 'بریک\u000cاوت',
+    breakout: 'بریک\u200cاوت',
     ema_rsi: 'EMA + RSI',
     rsi_threshold: 'آستانه RSI',
     macd: 'کراس MACD',
@@ -44,7 +44,7 @@ const formatSideLabel = (side: Signal['side']): string => {
 
 const formatTagLabel = (tag: string): string => {
   const map: Record<string, string> = {
-    breakout: 'بریک\u000cاوت',
+    breakout: 'بریک\u200cاوت',
     momentum: 'مومنتوم',
     ema_cross: 'تقاطع EMA',
     rsi_filter: 'فیلتر RSI',
@@ -91,7 +91,7 @@ export const formatSignalMessage = (signal: Signal): string => {
     `<b>جهت:</b> ${escapeHtml(formatSideLabel(signal.side))}`,
     `<b>قیمت:</b> ${formatPrice(signal.price)}`,
     `<b>اعتماد:</b> ${signal.confidence}%`,
-    `<b>برچسب\u000cها:</b> ${escapeHtml(tags.join('، ') || 'نامشخص')}`,
+    `<b>برچسب\u200cها:</b> ${escapeHtml(tags.join('، ') || 'نامشخص')}`,
     `<b>دلیل:</b> ${escapeHtml(signal.reason)}`,
   ];
 
