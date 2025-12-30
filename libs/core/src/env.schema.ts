@@ -141,7 +141,10 @@ const envObject = z
     BINANCE_SYMBOLS: z.string().trim().optional(),
     DEFAULT_TIMEFRAMES: csv(["5m", "15m"]).default(["5m", "15m"]),
     MONITORING_ENABLED: toBool(true).default(true),
-    PROVIDERS_ENABLED: z.string().trim().default("binance,bybit,okx"),
+    PROVIDERS_ENABLED: z
+      .string()
+      .trim()
+      .default("binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp"),
     MARKET_DATA_INGEST_ENABLED: toBool(true).default(true),
     MARKET_DATA_TIMEFRAMES: csv(["1m"]).default(["1m"]),
     MARKET_DATA_TICKER_TTL_SECONDS: toInt(120).pipe(z.number().int().min(5).max(3600)),

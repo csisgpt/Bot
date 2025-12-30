@@ -9,6 +9,8 @@ export * from './providers/binance.provider';
 export * from './providers/bybit.provider';
 export * from './providers/okx.provider';
 export * from './providers/kcex.provider';
+export * from './providers/coinbase.provider';
+export * from './providers/kraken.provider';
 export * from './arbitrage/arbitrage-engine';
 export * from './arbitrage/strategies/cross-exchange-spread.strategy';
 export * from './arbitrage/strategies/funding-divergence.strategy';

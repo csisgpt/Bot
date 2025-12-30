@@ -1,218 +1,176 @@
-import { EventEmitter } from 'events';
 import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
+import { BaseWsProvider } from './base-ws.provider';
+import { InstrumentMapping, Ticker, Candle } from '../models';
 import { MarketDataProvider } from '../interfaces';
-import { InstrumentMapping, ProviderSnapshot, Ticker, Candle } from '../models';
-import { createHttpClient } from '../utils/http.util';
-import { retry } from '../utils/retry.util';
-import { normalizeOkxRestCandle, normalizeTickerFromBestBidAsk } from '../normalizers';
-import { Logger } from '@nestjs/common';
+import { normalizeTickerFromBestBidAsk } from '../normalizers';
+import * as WebSocket from 'ws';
+
+interface OkxWsMessage {
+  arg?: { channel?: string; instId?: string };
+  data?: Array<Record<string, string>> | string[];
+  event?: string;
+  code?: string;
+  msg?: string;
+}
 
 @Injectable()
-export class OkxMarketDataProvider extends EventEmitter implements MarketDataProvider {
-  readonly provider = 'okx';
-  private readonly logger = new Logger('okx-provider');
-  private readonly restClient;
-  private connected = false;
-  private lastMessageTs: number | null = null;
-  private reconnects = 0;
-  private failures = 0;
-  private lastError: string | null = null;
-  private tickerMappings: InstrumentMapping[] = [];
-  private candleMappings: InstrumentMapping[] = [];
+export class OkxMarketDataProvider extends BaseWsProvider implements MarketDataProvider {
+  private tickerMappings = new Map<string, InstrumentMapping>();
+  private candleMappings = new Map<string, InstrumentMapping>();
   private timeframes: string[] = [];
-  private tickerTimer?: NodeJS.Timeout;
-  private candleTimer?: NodeJS.Timeout;
-  private readonly pollIntervalMs: number;
-  private readonly restConcurrency: number;
 
   constructor(private readonly configService: ConfigService) {
-    super();
-    const restUrl = configService.get<string>('OKX_REST_URL', 'https://www.okx.com');
-    const timeoutMs = configService.get<number>('OKX_REST_TIMEOUT_MS', 10000);
-    this.restClient = createHttpClient(restUrl, timeoutMs);
-    this.pollIntervalMs = configService.get<number>('OKX_POLL_INTERVAL_MS', 10000);
-    this.restConcurrency = configService.get<number>('OKX_REST_CONCURRENCY', 4);
-
-    const wsEnabled = configService.get<boolean>('OKX_WS_ENABLED', false);
-    if (wsEnabled) {
-      // TODO: Implement OKX public WS subscriptions per https://www.okx.com/docs-v5/en/
-      this.logger.warn(
-        JSON.stringify({
-          event: 'provider_ws_todo',
-          provider: this.provider,
-          message: 'WS فعال نشده است؛ در حال حاضر از REST استفاده می‌شود.',
-        }),
-      );
-    }
-  }
-
-  async connect(): Promise<void> {
-    this.connected = true;
-    this.startPolling();
-  }
-
-  async disconnect(): Promise<void> {
-    this.connected = false;
-    this.stopPolling();
+    const wsUrl = configService.get<string>('OKX_WS_URL', 'wss://ws.okx.com:8443/ws/v5/public');
+    super('okx', { url: wsUrl, heartbeatMs: 20000 });
   }
 
   async subscribeTickers(instruments: InstrumentMapping[]): Promise<void> {
-    this.tickerMappings = instruments;
-    this.startPolling();
+    instruments.forEach((mapping) => {
+      this.tickerMappings.set(mapping.providerInstId, mapping);
+    });
+    this.sendSubscribe();
   }
 
   async subscribeCandles(instruments: InstrumentMapping[], timeframes: string[]): Promise<void> {
-    this.candleMappings = instruments;
+    instruments.forEach((mapping) => {
+      this.candleMappings.set(mapping.providerInstId, mapping);
+    });
     this.timeframes = timeframes;
-    this.startPolling();
+    this.sendSubscribe();
   }
 
-  getSnapshot(): ProviderSnapshot {
-    return {
-      provider: this.provider,
-      connected: this.connected,
-      lastMessageTs: this.lastMessageTs,
-      reconnects: this.reconnects,
-      failures: this.failures,
-      lastError: this.lastError,
-    };
+  protected buildUrl(): string {
+    return this.options.url;
   }
 
-  private startPolling(): void {
-    if (!this.connected) {
+  protected onOpen(): void {
+    this.logger.log(JSON.stringify({ event: 'provider_connected', provider: this.provider }));
+    this.sendSubscribe();
+  }
+
+  protected onMessage(data: WebSocket.RawData): void {
+    const raw = typeof data === 'string' ? data : data.toString();
+    if (raw === 'pong') {
       return;
     }
-    if (!this.tickerTimer && this.tickerMappings.length) {
-      this.tickerTimer = setInterval(() => {
-        void this.pollTickers();
-      }, this.pollIntervalMs);
-      void this.pollTickers();
-    }
-    if (!this.candleTimer && this.candleMappings.length && this.timeframes.length) {
-      this.candleTimer = setInterval(() => {
-        void this.pollCandles();
-      }, this.pollIntervalMs);
-      void this.pollCandles();
-    }
-  }
 
-  private stopPolling(): void {
-    if (this.tickerTimer) {
-      clearInterval(this.tickerTimer);
-      this.tickerTimer = undefined;
+    let message: OkxWsMessage | null = null;
+    try {
+      message = JSON.parse(raw) as OkxWsMessage;
+    } catch (error) {
+      this.failures += 1;
+      return;
     }
-    if (this.candleTimer) {
-      clearInterval(this.candleTimer);
-      this.candleTimer = undefined;
-    }
-  }
 
-  private async pollTickers(): Promise<void> {
-    await this.runWithConcurrency(this.tickerMappings, async (mapping) => {
-      try {
-        const response = await retry(
-          () =>
-            this.restClient.get('/api/v5/market/ticker', {
-              params: { instId: mapping.providerInstId },
-            }),
-          { attempts: 3, baseDelayMs: 500, shouldRetry: this.isRetryable },
-        );
-        const data = response.data?.data?.[0];
-        if (!data) {
-          return;
-        }
-        const bid = Number(data.bidPx);
-        const ask = Number(data.askPx);
-        const last = Number(data.last);
-        const ts = Number(data.ts) || Date.now();
-        const ticker = normalizeTickerFromBestBidAsk(
-          this.provider,
-          mapping,
-          bid,
-          ask,
-          Number.isFinite(last) ? last : (bid + ask) / 2,
-          ts,
-          Number(data.vol24h),
-        );
-        if (ticker) {
-          this.lastMessageTs = ts;
-          this.emit('ticker', ticker as Ticker);
-        }
-      } catch (error) {
-        this.failures += 1;
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        this.lastError = message;
-        this.logger.warn(
-          JSON.stringify({
-            event: 'provider_rest_error',
-            provider: this.provider,
-            symbol: mapping.providerInstId,
-            message,
-          }),
-        );
+    if (message?.event) {
+      if (message.event === 'error') {
+        this.lastError = message.msg ?? 'Unknown error';
       }
-    });
-  }
-
-  private async pollCandles(): Promise<void> {
-    const tasks = this.candleMappings.flatMap((mapping) =>
-      this.timeframes.map((timeframe) => ({ mapping, timeframe })),
-    );
-    await this.runWithConcurrency(tasks, async ({ mapping, timeframe }) => {
-      try {
-        const response = await retry(
-          () =>
-            this.restClient.get('/api/v5/market/candles', {
-              params: { instId: mapping.providerInstId, bar: timeframe, limit: 1 },
-            }),
-          { attempts: 3, baseDelayMs: 500, shouldRetry: this.isRetryable },
-        );
-        const data = response.data?.data?.[0];
-        if (!data) {
-          return;
-        }
-        const candle = normalizeOkxRestCandle(data, mapping, timeframe);
-        if (candle) {
-          this.lastMessageTs = Date.now();
-          this.emit('candle', candle as Candle);
-        }
-      } catch (error) {
-        this.failures += 1;
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        this.lastError = message;
-        this.logger.warn(
-          JSON.stringify({
-            event: 'provider_rest_error',
-            provider: this.provider,
-            symbol: mapping.providerInstId,
-            message,
-          }),
-        );
-      }
-    });
-  }
-
-  private runWithConcurrency<T>(
-    items: T[],
-    worker: (item: T) => Promise<void>,
-  ): Promise<void> {
-    const concurrency = Math.max(1, this.restConcurrency);
-    let index = 0;
-    const runners = new Array(Math.min(concurrency, items.length)).fill(null).map(async () => {
-      while (index < items.length) {
-        const current = items[index++];
-        await worker(current);
-      }
-    });
-    return Promise.all(runners).then(() => undefined);
-  }
-
-  private isRetryable(error: unknown): boolean {
-    const status = (error as { response?: { status?: number } })?.response?.status;
-    if (status) {
-      return status === 429 || status >= 500;
+      return;
     }
-    return true;
+
+    if (!message?.arg?.channel || !message.data) {
+      return;
+    }
+
+    if (message.arg.channel === 'tickers') {
+      const instId = message.arg.instId ?? '';
+      const mapping = this.tickerMappings.get(instId);
+      if (!mapping) {
+        return;
+      }
+      const dataItem = Array.isArray(message.data) ? message.data[0] : undefined;
+      if (!dataItem || typeof dataItem !== 'object') {
+        return;
+      }
+      const bid = Number(dataItem.bidPx);
+      const ask = Number(dataItem.askPx);
+      const last = Number(dataItem.last);
+      const ts = Number(dataItem.ts) || Date.now();
+      const ticker = normalizeTickerFromBestBidAsk(
+        this.provider,
+        mapping,
+        bid,
+        ask,
+        Number.isFinite(last) ? last : (bid + ask) / 2,
+        ts,
+        Number(dataItem.vol24h),
+      );
+      if (ticker) {
+        this.emit('ticker', ticker as Ticker);
+      }
+      return;
+    }
+
+    if (message.arg.channel.startsWith('candle')) {
+      const instId = message.arg.instId ?? '';
+      const mapping = this.candleMappings.get(instId);
+      if (!mapping) {
+        return;
+      }
+      const payload = Array.isArray(message.data) ? message.data[0] : undefined;
+      if (!Array.isArray(payload)) {
+        return;
+      }
+      const [ts, open, high, low, close, volume, , , confirm] = payload as string[];
+      const candle: Candle = {
+        provider: this.provider,
+        canonicalSymbol: mapping.canonicalSymbol,
+        timeframe: this.parseTimeframe(message.arg.channel),
+        openTime: Number(ts),
+        open: Number(open),
+        high: Number(high),
+        low: Number(low),
+        close: Number(close),
+        volume: Number(volume),
+        isFinal: confirm === '1',
+      };
+      if ([candle.open, candle.high, candle.low, candle.close, candle.volume, candle.openTime].every(Number.isFinite)) {
+        this.emit('candle', candle as Candle);
+      }
+    }
+  }
+
+  protected onClose(): void {
+    this.logger.warn(JSON.stringify({ event: 'provider_disconnected', provider: this.provider }));
+  }
+
+  private sendSubscribe(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    const args: Array<{ channel: string; instId: string }> = [];
+    if (this.tickerMappings.size) {
+      for (const [instId] of this.tickerMappings) {
+        args.push({ channel: 'tickers', instId });
+      }
+    }
+    if (this.candleMappings.size && this.timeframes.length) {
+      for (const [instId] of this.candleMappings) {
+        for (const timeframe of this.timeframes) {
+          args.push({ channel: this.toOkxChannel(timeframe), instId });
+        }
+      }
+    }
+    if (!args.length) {
+      return;
+    }
+    this.send({ op: 'subscribe', args });
+  }
+
+  private toOkxChannel(timeframe: string): string {
+    const normalized = timeframe.trim();
+    if (/^\d+[mhdwMHDW]$/.test(normalized)) {
+      const unit = normalized.slice(-1);
+      const value = normalized.slice(0, -1);
+      const unitToken = unit.toUpperCase();
+      return `candle${value}${unitToken}`;
+    }
+    return `candle${normalized}`;
+  }
+
+  private parseTimeframe(channel: string): string {
+    return channel.replace('candle', '').toLowerCase();
   }
 }

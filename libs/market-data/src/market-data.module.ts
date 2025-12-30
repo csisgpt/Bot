@@ -6,6 +6,8 @@ import { BinanceMarketDataProvider } from './providers/binance.provider';
 import { BybitMarketDataProvider } from './providers/bybit.provider';
 import { OkxMarketDataProvider } from './providers/okx.provider';
 import { KcexMarketDataProvider } from './providers/kcex.provider';
+import { CoinbaseMarketDataProvider } from './providers/coinbase.provider';
+import { KrakenMarketDataProvider } from './providers/kraken.provider';
 
 @Module({
   imports: [ConfigModule],
@@ -16,6 +18,8 @@ import { KcexMarketDataProvider } from './providers/kcex.provider';
     BybitMarketDataProvider,
     OkxMarketDataProvider,
     KcexMarketDataProvider,
+    CoinbaseMarketDataProvider,
+    KrakenMarketDataProvider,
     {
       provide: MARKET_DATA_PROVIDERS,
       useFactory: (
@@ -23,12 +27,16 @@ import { KcexMarketDataProvider } from './providers/kcex.provider';
         bybit: BybitMarketDataProvider,
         okx: OkxMarketDataProvider,
         kcex: KcexMarketDataProvider,
-      ) => [binance, bybit, okx, kcex],
+        coinbase: CoinbaseMarketDataProvider,
+        kraken: KrakenMarketDataProvider,
+      ) => [binance, bybit, okx, kcex, coinbase, kraken],
       inject: [
         BinanceMarketDataProvider,
         BybitMarketDataProvider,
         OkxMarketDataProvider,
         KcexMarketDataProvider,
+        CoinbaseMarketDataProvider,
+        KrakenMarketDataProvider,
       ],
     },
   ],

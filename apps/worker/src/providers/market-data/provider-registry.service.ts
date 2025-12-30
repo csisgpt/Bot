@@ -13,7 +13,10 @@ export class ProviderRegistryService {
 
   getEnabledProviders(): MarketDataProvider[] {
     const enabled = this.configService
-      .get<string>('PROVIDERS_ENABLED', 'binance,bybit,okx')
+      .get<string>(
+        'PROVIDERS_ENABLED',
+        'binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp',
+      )
       .split(',')
       .map((item) => item.trim().toLowerCase())
       .filter(Boolean);

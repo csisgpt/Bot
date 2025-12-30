@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import { AxiosInstance } from 'axios';
 import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
 import {
@@ -7,22 +7,10 @@ import {
   MarketDataTicker,
 } from '../market-data-provider.interface';
 import { MarketDataProviderBase } from '../market-data-provider.base';
+import { canonicalizeSymbol, joinSymbol } from '../utils/canonicalize';
+import { createProviderHttp, retry } from '../utils/http';
 
-const normalizeToOkxSymbol = (symbol: string): string => {
-  if (symbol.includes('-')) {
-    return symbol.toUpperCase();
-  }
-  const upper = symbol.toUpperCase();
-  const suffixes = ['USDT', 'USDC', 'USD', 'BTC', 'ETH'];
-  const match = suffixes.find((suffix) => upper.endsWith(suffix));
-  if (!match) {
-    return upper;
-  }
-  const base = upper.slice(0, -match.length);
-  return `${base}-${match}`;
-};
-
-const normalizeFromOkxSymbol = (symbol: string): string => symbol.replace('-', '').toUpperCase();
+const normalizeFromOkxSymbol = (symbol: string): string => canonicalizeSymbol(symbol);
 
 @Injectable()
 export class OkxMarketDataProvider
@@ -36,40 +24,36 @@ export class OkxMarketDataProvider
     super('okx');
     const baseURL = this.configService.get<string>('OKX_REST_URL', 'https://www.okx.com');
     const timeout = this.configService.get<number>('OKX_REST_TIMEOUT_MS', 10000);
-    this.http = axios.create({
-      baseURL,
-      timeout,
-      headers: {
-        'User-Agent': 'market-data-worker/1.0',
-      },
-    });
+    this.http = createProviderHttp(baseURL, timeout);
   }
 
   async getTickers(params: { symbols: string[] }): Promise<MarketDataTicker[]> {
-    const symbols = params.symbols.map((symbol) => symbol.toUpperCase());
+    const symbols = params.symbols.map((symbol) => canonicalizeSymbol(symbol));
     if (symbols.length === 0) {
       return [];
     }
     const startedAt = Date.now();
     try {
-      const response = await this.http.get('/api/v5/market/tickers', {
-        params: {
-          instType: 'SPOT',
-        },
-      });
+      const response = await retry(() =>
+        this.http.get('/api/v5/market/tickers', {
+          params: {
+            instType: 'SPOT',
+          },
+        }),
+      );
       const list =
         (response.data as { data?: Array<Record<string, string>> })?.data ?? [];
       const normalized = list.map((item) => ({
         provider: this.name,
         symbol: normalizeFromOkxSymbol(String(item.instId)),
-        price: Number(item.last),
+        last: Number(item.last),
         bid: Number(item.bidPx),
         ask: Number(item.askPx),
-        ts: Date.now(),
+        time: Date.now(),
       }));
       const filtered = normalized.filter((item) => symbols.includes(item.symbol));
       this.recordSuccess(Date.now() - startedAt);
-      return filtered.filter((item) => Number.isFinite(item.price));
+      return filtered.filter((item) => Number.isFinite(item.last));
     } catch (error) {
       this.recordError(error);
       throw error;
@@ -83,18 +67,20 @@ export class OkxMarketDataProvider
   }): Promise<MarketDataCandle[]> {
     const startedAt = Date.now();
     try {
-      const response = await this.http.get('/api/v5/market/candles', {
-        params: {
-          instId: normalizeToOkxSymbol(params.symbol),
-          bar: params.interval,
-          limit: params.limit ?? 200,
-        },
-      });
+      const response = await retry(() =>
+        this.http.get('/api/v5/market/candles', {
+          params: {
+            instId: joinSymbol(params.symbol, '-'),
+            bar: params.interval,
+            limit: params.limit ?? 200,
+          },
+        }),
+      );
       const list =
         (response.data as { data?: Array<string[]> })?.data ?? [];
       const candles = list.map((item) => ({
         provider: this.name,
-        symbol: params.symbol.toUpperCase(),
+        symbol: canonicalizeSymbol(params.symbol),
         interval: params.interval,
         ts: Number(item[0]),
         open: Number(item[1]),

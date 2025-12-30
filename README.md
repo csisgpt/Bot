@@ -173,7 +173,7 @@ Worker feeds are configured in code (not env) in:
 Define `destinations` with Telegram chat IDs and set schedules (cron). Prices and news feeds run via `FeedRunnerService` and publish HTML messages through the Telegram bot. Ensure these env keys are set for local runs:
 
 - `TELEGRAM_BOT_TOKEN`
-- `PROVIDERS_ENABLED` (defaults to `binance,bybit,okx`)
+- `PROVIDERS_ENABLED` (defaults to `binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp`)
 - `NEWS_*` URLs + timeout/retry settings (optional, defaults are set in code)
 
 ### Running workers locally

@@ -1,65 +1,51 @@
-import { AxiosInstance } from 'axios';
-import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
-import {
-  MarketDataCandle,
-  MarketDataProvider,
-  MarketDataTicker,
-} from '../market-data-provider.interface';
+import { ConfigService } from '@nestjs/config';
+import { MarketDataCandle, MarketDataProvider, MarketDataTicker } from '../market-data-provider.interface';
 import { MarketDataProviderBase } from '../market-data-provider.base';
 import { canonicalizeSymbol } from '../utils/canonicalize';
 import { createProviderHttp, retry } from '../utils/http';
 
 @Injectable()
-export class BinanceMarketDataProvider
+export class MexcMarketDataProvider
   extends MarketDataProviderBase
   implements MarketDataProvider
 {
-  name = 'binance';
-  private readonly http: AxiosInstance;
+  name = 'mexc';
+  private readonly http;
 
   constructor(private readonly configService: ConfigService) {
-    super('binance');
-    const baseURL = this.configService.get<string>(
-      'BINANCE_BASE_URL',
-      'https://data-api.binance.vision',
-    );
-    const timeout = this.configService.get<number>('BINANCE_REQUEST_TIMEOUT_MS', 10000);
+    super('mexc');
+    const baseURL = this.configService.get<string>('MEXC_REST_URL', 'https://api.mexc.com');
+    const timeout = this.configService.get<number>('MEXC_REST_TIMEOUT_MS', 10000);
     this.http = createProviderHttp(baseURL, timeout);
   }
 
   async getTickers(params: { symbols: string[] }): Promise<MarketDataTicker[]> {
     const symbols = params.symbols.map((symbol) => canonicalizeSymbol(symbol));
-    if (symbols.length === 0) {
-      return [];
-    }
-
     const startedAt = Date.now();
     try {
-      const response = await retry(() =>
-        this.http.get('/api/v3/ticker/bookTicker', {
-          params: {
-            symbols: JSON.stringify(symbols),
-          },
+      const results = await Promise.all(
+        symbols.map(async (symbol) => {
+          const response = await retry(() =>
+            this.http.get('/api/v3/ticker/bookTicker', {
+              params: { symbol },
+            }),
+          );
+          const data = response.data as { bidPrice?: string; askPrice?: string };
+          const bid = Number(data.bidPrice);
+          const ask = Number(data.askPrice);
+          return {
+            provider: this.name,
+            symbol,
+            last: Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : NaN,
+            bid,
+            ask,
+            time: Date.now(),
+          };
         }),
       );
-      const tickers = (
-        response.data as Array<{ symbol: string; bidPrice: string; askPrice: string }>
-      ).map((item) => {
-        const bid = Number(item.bidPrice);
-        const ask = Number(item.askPrice);
-        const last = Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : NaN;
-        return {
-          provider: this.name,
-          symbol: canonicalizeSymbol(item.symbol),
-          last,
-          bid,
-          ask,
-          time: Date.now(),
-        };
-      });
       this.recordSuccess(Date.now() - startedAt);
-      return tickers.filter((item) => Number.isFinite(item.last));
+      return results.filter((item) => Number.isFinite(item.last));
     } catch (error) {
       this.recordError(error);
       throw error;
@@ -73,13 +59,15 @@ export class BinanceMarketDataProvider
   }): Promise<MarketDataCandle[]> {
     const startedAt = Date.now();
     try {
-      const response = await this.http.get('/api/v3/klines', {
-        params: {
-          symbol: canonicalizeSymbol(params.symbol),
-          interval: params.interval,
-          limit: params.limit ?? 200,
-        },
-      });
+      const response = await retry(() =>
+        this.http.get('/api/v3/klines', {
+          params: {
+            symbol: canonicalizeSymbol(params.symbol),
+            interval: params.interval,
+            limit: params.limit ?? 200,
+          },
+        }),
+      );
       const candles = (response.data as Array<[number, string, string, string, string, string]>).map(
         (item) => ({
           provider: this.name,

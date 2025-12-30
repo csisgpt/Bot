@@ -111,7 +111,7 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
         }
         tickersBySymbol.get(ticker.symbol)?.push({
           provider: result.value.provider,
-          price: ticker.price,
+          price: ticker.last,
         });
       }
     }

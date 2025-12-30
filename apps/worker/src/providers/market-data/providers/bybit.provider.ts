@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import { AxiosInstance } from 'axios';
 import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
 import {
@@ -7,6 +7,8 @@ import {
   MarketDataTicker,
 } from '../market-data-provider.interface';
 import { MarketDataProviderBase } from '../market-data-provider.base';
+import { canonicalizeSymbol } from '../utils/canonicalize';
+import { createProviderHttp, retry } from '../utils/http';
 
 const mapIntervalToBybit = (interval: string): string => {
   const normalized = interval.toLowerCase();
@@ -40,40 +42,36 @@ export class BybitMarketDataProvider
     super('bybit');
     const baseURL = this.configService.get<string>('BYBIT_REST_URL', 'https://api.bybit.com');
     const timeout = this.configService.get<number>('BYBIT_REST_TIMEOUT_MS', 10000);
-    this.http = axios.create({
-      baseURL,
-      timeout,
-      headers: {
-        'User-Agent': 'market-data-worker/1.0',
-      },
-    });
+    this.http = createProviderHttp(baseURL, timeout);
   }
 
   async getTickers(params: { symbols: string[] }): Promise<MarketDataTicker[]> {
-    const symbols = params.symbols.map((symbol) => symbol.toUpperCase());
+    const symbols = params.symbols.map((symbol) => canonicalizeSymbol(symbol));
     if (symbols.length === 0) {
       return [];
     }
     const startedAt = Date.now();
     try {
-      const response = await this.http.get('/v5/market/tickers', {
-        params: {
-          category: 'spot',
-        },
-      });
+      const response = await retry(() =>
+        this.http.get('/v5/market/tickers', {
+          params: {
+            category: 'spot',
+          },
+        }),
+      );
       const list =
         (response.data as { result?: { list?: Array<Record<string, string>> } })?.result?.list ?? [];
       const filtered = list.filter((item) => symbols.includes(String(item.symbol).toUpperCase()));
       const tickers = filtered.map((item) => ({
         provider: this.name,
-        symbol: String(item.symbol).toUpperCase(),
-        price: Number(item.lastPrice),
+        symbol: canonicalizeSymbol(String(item.symbol)),
+        last: Number(item.lastPrice),
         bid: Number(item.bid1Price),
         ask: Number(item.ask1Price),
-        ts: Date.now(),
+        time: Date.now(),
       }));
       this.recordSuccess(Date.now() - startedAt);
-      return tickers.filter((item) => Number.isFinite(item.price));
+      return tickers.filter((item) => Number.isFinite(item.last));
     } catch (error) {
       this.recordError(error);
       throw error;
@@ -87,19 +85,21 @@ export class BybitMarketDataProvider
   }): Promise<MarketDataCandle[]> {
     const startedAt = Date.now();
     try {
-      const response = await this.http.get('/v5/market/kline', {
-        params: {
-          category: 'spot',
-          symbol: params.symbol.toUpperCase(),
-          interval: mapIntervalToBybit(params.interval),
-          limit: params.limit ?? 200,
-        },
-      });
+      const response = await retry(() =>
+        this.http.get('/v5/market/kline', {
+          params: {
+            category: 'spot',
+            symbol: canonicalizeSymbol(params.symbol),
+            interval: mapIntervalToBybit(params.interval),
+            limit: params.limit ?? 200,
+          },
+        }),
+      );
       const list =
         (response.data as { result?: { list?: Array<string[]> } })?.result?.list ?? [];
       const candles = list.map((item) => ({
         provider: this.name,
-        symbol: params.symbol.toUpperCase(),
+        symbol: canonicalizeSymbol(params.symbol),
         interval: params.interval,
         ts: Number(item[0]),
         open: Number(item[1]),

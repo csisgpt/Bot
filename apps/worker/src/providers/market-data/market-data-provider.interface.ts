@@ -1,10 +1,10 @@
 export interface MarketDataTicker {
   provider: string;
   symbol: string;
-  price: number;
+  last: number;
   bid?: number;
   ask?: number;
-  ts?: number;
+  time?: number;
 }
 
 export interface MarketDataCandle {
