@@ -18,6 +18,7 @@ export abstract class BaseWsProvider extends EventEmitter {
   protected reconnects = 0;
   protected failures = 0;
   protected lastError: string | null = null;
+  protected readonly sendQueue: string[] = [];
   private heartbeatTimer?: NodeJS.Timeout;
   private reconnectTimer?: NodeJS.Timeout;
   private reconnectDelayMs: number;
@@ -42,7 +43,7 @@ export abstract class BaseWsProvider extends EventEmitter {
   protected abstract onMessage(data: WebSocket.RawData): void;
   protected abstract onClose(): void;
 
-  async connect(): Promise<void> {
+  async start(): Promise<void> {
     if (this.ws && this.connected) {
       return;
     }
@@ -55,11 +56,18 @@ export abstract class BaseWsProvider extends EventEmitter {
       this.connected = true;
       this.reconnectDelayMs = this.reconnectBaseMs;
       this.onOpen();
+      this.flushQueue();
       this.startHeartbeat();
     });
     this.ws.on('message', (data) => {
       this.lastMessageTs = Date.now();
-      this.onMessage(data);
+      try {
+        this.onMessage(data);
+      } catch (e) {
+        this.failures += 1;
+        this.lastError = e instanceof Error ? e.message : String(e);
+        this.logger.warn(JSON.stringify({ event: 'provider_on_message_failed', provider: this.provider, message: this.lastError }));
+      }
     });
     this.ws.on('close', () => {
       this.connected = false;
@@ -82,7 +90,7 @@ export abstract class BaseWsProvider extends EventEmitter {
     });
   }
 
-  async disconnect(): Promise<void> {
+  async stop(): Promise<void> {
     this.cleanup();
   }
 
@@ -98,10 +106,24 @@ export abstract class BaseWsProvider extends EventEmitter {
   }
 
   protected send(payload: unknown): void {
+    const message = JSON.stringify(payload);
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.sendQueue.push(message);
+      return;
+    }
+    this.ws.send(message);
+  }
+
+  private flushQueue(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
-    this.ws.send(JSON.stringify(payload));
+    while (this.sendQueue.length) {
+      const message = this.sendQueue.shift();
+      if (message) {
+        this.ws.send(message);
+      }
+    }
   }
 
   private startHeartbeat(): void {
@@ -125,7 +147,7 @@ export abstract class BaseWsProvider extends EventEmitter {
     this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, this.reconnectMaxMs);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      void this.connect();
+      void this.start();
     }, delay);
   }
 
@@ -138,12 +160,37 @@ export abstract class BaseWsProvider extends EventEmitter {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
-    if (this.ws) {
-      this.ws.removeAllListeners();
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-        this.ws.close();
+
+    const ws = this.ws;
+    this.ws = undefined;
+    this.connected = false;
+
+    if (!ws) return;
+
+    // ✅ IMPORTANT: ensure there is ALWAYS an error handler before we close/terminate
+    ws.on('error', () => { });
+
+    // ✅ Detach our listeners (but DO NOT remove 'error' handler)
+    ws.removeAllListeners('open');
+    ws.removeAllListeners('message');
+    ws.removeAllListeners('close');
+    // (error handlers remain; we just added a noop above)
+
+    try {
+      // If it's OPEN, close gracefully
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close(1000, 'cleanup');
+        return;
       }
-      this.ws = undefined;
+
+      // If CONNECTING or CLOSING, terminate (can emit error, but we have handler)
+      if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.CLOSING) {
+        ws.terminate();
+        return;
+      }
+    } catch {
+      // swallow – we must never crash here
     }
   }
+
 }

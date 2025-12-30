@@ -720,10 +720,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
   private getPopularInstruments(): string[] {
     const gold = this.normalizeCsv(this.configService.get('GOLD_INSTRUMENTS', 'XAUTUSDT'));
-    const crypto = this.normalizeCsv(this.configService.get('CRYPTO_INSTRUMENTS', 'BTCUSDT,ETHUSDT'));
+    const crypto = this.normalizeCsv(this.configService.get('CRYPTO_INSTRUMENTS', 'BTCUSDT,ETHUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,TRXUSDT'));
     const legacy = this.normalizeCsv(this.configService.get('BINANCE_SYMBOLS', ''));
     const combined = crypto.length > 0 ? [...gold, ...crypto] : [...gold, ...legacy];
-    const fallback = ['BTCUSDT', 'ETHUSDT', 'XAUTUSDT'];
+    const fallback = ['BTCUSDT', 'ETHUSDT', 'XAUTUSDT','XRPUSDT','ADAUSDT','DOGEUSDT','TRXUSDT'];
     const unique = Array.from(new Set(combined.length > 0 ? combined : fallback));
     return unique.map((item) => item.toUpperCase()).slice(0, 6);
   }

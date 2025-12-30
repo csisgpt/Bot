@@ -7,6 +7,8 @@ import { createHttpClient } from '../utils/http.util';
 import { retry } from '../utils/retry.util';
 import { normalizeBybitKline, normalizeTickerFromBestBidAsk } from '../normalizers';
 import * as WebSocket from 'ws';
+import { toInterval } from './interval-mapper';
+import { getProviderEndpoints } from './providers.config';
 
 interface BybitWsMessage {
   topic?: string;
@@ -16,21 +18,22 @@ interface BybitWsMessage {
 
 @Injectable()
 export class BybitMarketDataProvider extends BaseWsProvider implements MarketDataProvider {
+  supportsWebsocket = true;
   private tickerMappings = new Map<string, InstrumentMapping>();
   private candleMappings = new Map<string, InstrumentMapping>();
   private timeframes: string[] = [];
-  private fallbackTimer?: NodeJS.Timeout;
   private readonly restClient;
-  private readonly fallbackIntervalMs: number;
 
   constructor(private readonly configService: ConfigService) {
-    const wsUrl = configService.get<string>('BYBIT_WS_URL', 'wss://stream.bybit.com/v5/public/spot');
-    super('bybit', { url: wsUrl, heartbeatMs: 20000 });
-    const restUrl = configService.get<string>('BYBIT_REST_URL', 'https://api.bybit.com');
-    const timeoutMs = configService.get<number>('BYBIT_REST_TIMEOUT_MS', 10000);
-    this.restClient = createHttpClient(restUrl, timeoutMs);
-    this.fallbackIntervalMs =
-      configService.get<number>('BYBIT_REST_FALLBACK_INTERVAL_SECONDS', 60) * 1000;
+    const endpoints = getProviderEndpoints(configService, 'bybit');
+    super('bybit', {
+      url: endpoints.ws ?? 'wss://stream.bybit.com/v5/public/spot',
+      heartbeatMs: 20000,
+      reconnectBaseMs: configService.get<number>('MARKET_DATA_WS_RECONNECT_BASE_DELAY_MS', 1000),
+      reconnectMaxMs: configService.get<number>('MARKET_DATA_WS_RECONNECT_MAX_DELAY_MS', 30000),
+    });
+    const timeoutMs = configService.get<number>('MARKET_DATA_REST_TIMEOUT_MS', 10000);
+    this.restClient = createHttpClient(endpoints.rest, timeoutMs);
   }
 
   async subscribeTickers(instruments: InstrumentMapping[]): Promise<void> {
@@ -46,7 +49,6 @@ export class BybitMarketDataProvider extends BaseWsProvider implements MarketDat
     });
     this.timeframes = timeframes;
     this.sendSubscribe();
-    this.ensureFallbackPolling();
   }
 
   protected buildUrl(): string {
@@ -58,7 +60,6 @@ export class BybitMarketDataProvider extends BaseWsProvider implements MarketDat
       JSON.stringify({ event: 'provider_connected', provider: this.provider }),
     );
     this.sendSubscribe();
-    this.stopFallbackPolling();
   }
 
   protected onMessage(data: WebSocket.RawData): void {
@@ -120,7 +121,6 @@ export class BybitMarketDataProvider extends BaseWsProvider implements MarketDat
     this.logger.warn(
       JSON.stringify({ event: 'provider_disconnected', provider: this.provider }),
     );
-    this.ensureFallbackPolling();
   }
 
   private sendSubscribe(): void {
@@ -129,8 +129,10 @@ export class BybitMarketDataProvider extends BaseWsProvider implements MarketDat
     }
     const args: string[] = [];
     if (this.tickerMappings.size) {
+      console.log(this.tickerMappings)
       for (const [symbol] of this.tickerMappings) {
         args.push(`tickers.${symbol}`);
+        console.log(symbol)
       }
     }
     if (this.candleMappings.size && this.timeframes.length) {
@@ -146,82 +148,76 @@ export class BybitMarketDataProvider extends BaseWsProvider implements MarketDat
     this.send({ op: 'subscribe', args });
   }
 
-  private mapInterval(interval: string): string {
-    if (/^\d+$/.test(interval)) {
-      return interval;
+  async fetchTickers(instruments: InstrumentMapping[]): Promise<Ticker[]> {
+    if (!instruments.length) {
+      return [];
     }
-    if (interval.endsWith('m')) {
-      return interval.replace('m', '');
-    }
-    if (interval.endsWith('h')) {
-      const hours = Number(interval.replace('h', ''));
-      return Number.isFinite(hours) ? String(hours * 60) : interval;
-    }
-    return interval;
-  }
-
-  private ensureFallbackPolling(): void {
-    if (this.connected || this.fallbackTimer || !this.candleMappings.size) {
-      return;
-    }
-    this.logger.warn(
-      JSON.stringify({ event: 'provider_rest_fallback', provider: this.provider }),
+    const response = await retry(
+      () =>
+        this.restClient.get('/v5/market/tickers', {
+          params: { category: 'spot' },
+        }),
+      { attempts: 3, baseDelayMs: 500 },
     );
-    this.fallbackTimer = setInterval(() => {
-      void this.pollCandles();
-    }, this.fallbackIntervalMs);
-  }
-
-  private stopFallbackPolling(): void {
-    if (this.fallbackTimer) {
-      clearInterval(this.fallbackTimer);
-      this.fallbackTimer = undefined;
-    }
-  }
-
-  private async pollCandles(): Promise<void> {
-    for (const [symbol, mapping] of this.candleMappings) {
-      for (const timeframe of this.timeframes) {
-        try {
-          const interval = this.mapInterval(timeframe);
-          const response = await retry(
-            () =>
-              this.restClient.get('/v5/market/kline', {
-                params: { category: 'spot', symbol, interval, limit: 2 },
-              }),
-            { attempts: 3, baseDelayMs: 500 },
-          );
-          const list = response.data?.result?.list ?? [];
-          const latest = Array.isArray(list) ? list[0] : null;
-          if (!latest) {
-            continue;
-          }
-          const candle = normalizeBybitKline(
-            {
-              data: {
-                start: Number(latest[0]),
-                open: latest[1],
-                high: latest[2],
-                low: latest[3],
-                close: latest[4],
-                volume: latest[5],
-                confirm: true,
-              },
-            },
-            mapping,
-            timeframe,
-          );
-          if (candle) {
-            this.emit('candle', candle as Candle);
-          }
-        } catch (error) {
-          this.failures += 1;
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          this.logger.warn(
-            JSON.stringify({ event: 'provider_rest_error', provider: this.provider, message, symbol }),
-          );
+    const list = response.data?.result?.list ?? [];
+    const mappingBySymbol = new Map(instruments.map((item) => [item.providerSymbol, item]));
+    return (list as Array<Record<string, string>>)
+      .map((item) => {
+        const mapping = mappingBySymbol.get(String(item.symbol));
+        if (!mapping) {
+          return null;
         }
-      }
-    }
+        const bid = Number(item.bid1Price);
+        const ask = Number(item.ask1Price);
+        const last = Number(item.lastPrice);
+        const ts = Date.now();
+        return normalizeTickerFromBestBidAsk(
+          this.provider,
+          mapping,
+          bid,
+          ask,
+          Number.isFinite(last) ? last : (bid + ask) / 2,
+          ts,
+          Number(item.volume24h),
+        );
+      })
+      .filter((ticker): ticker is Ticker => Boolean(ticker));
+  }
+
+  async fetchCandles(
+    instrument: InstrumentMapping,
+    timeframe: string,
+    limit: number,
+  ): Promise<Candle[]> {
+    const interval = toInterval('bybit', timeframe);
+    const response = await retry(
+      () =>
+        this.restClient.get('/v5/market/kline', {
+          params: { category: 'spot', symbol: instrument.providerSymbol, interval, limit },
+        }),
+      { attempts: 3, baseDelayMs: 500 },
+    );
+    const list = response.data?.result?.list ?? [];
+    return (list as Array<string[]>).map((item) =>
+      normalizeBybitKline(
+        {
+          data: {
+            start: Number(item[0]),
+            open: item[1],
+            high: item[2],
+            low: item[3],
+            close: item[4],
+            volume: item[5],
+            confirm: true,
+          },
+        },
+        instrument,
+        timeframe,
+      ) as Candle,
+    );
+  }
+
+  private mapInterval(interval: string): string {
+    return String(toInterval('bybit', interval));
   }
 }

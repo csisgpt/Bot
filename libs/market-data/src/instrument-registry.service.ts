@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Instrument, InstrumentMapping } from './models';
-import { buildInstrumentFromSymbol, okxSymbolFromCanonical, normalizeCanonicalSymbol } from './symbol-mapper';
+import {
+  buildInstrumentFromSymbol,
+  normalizeCanonicalSymbol,
+  providerSymbolFromCanonical,
+} from './symbol-mapper';
 
 @Injectable()
 export class InstrumentRegistryService {
@@ -43,33 +47,22 @@ export class InstrumentRegistryService {
   private buildMappings(provider: string): InstrumentMapping[] {
     return this.getInstruments()
       .map((instrument) => {
-        if (provider === 'okx') {
-          const okxSymbol = okxSymbolFromCanonical(instrument.canonicalSymbol);
-          if (!okxSymbol) {
-            this.logger.warn(
-              JSON.stringify({
-                event: 'symbol_mapping_skipped',
-                provider,
-                symbol: instrument.canonicalSymbol,
-              }),
-            );
-            return null;
-          }
-          return {
-            provider,
-            canonicalSymbol: instrument.canonicalSymbol,
-            providerSymbol: okxSymbol,
-            providerInstId: okxSymbol,
-            marketType: 'spot',
-            isActive: true,
-          } as InstrumentMapping;
+        const mapping = providerSymbolFromCanonical(provider, instrument.canonicalSymbol);
+        if (!mapping) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'symbol_mapping_skipped',
+              provider,
+              symbol: instrument.canonicalSymbol,
+            }),
+          );
+          return null;
         }
-
         return {
           provider,
           canonicalSymbol: instrument.canonicalSymbol,
-          providerSymbol: instrument.canonicalSymbol,
-          providerInstId: instrument.canonicalSymbol,
+          providerSymbol: mapping.providerSymbol,
+          providerInstId: mapping.providerInstId,
           marketType: 'spot',
           isActive: true,
         } as InstrumentMapping;

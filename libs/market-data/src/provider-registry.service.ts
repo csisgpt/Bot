@@ -16,20 +16,34 @@ export class ProviderRegistryService {
   ) {}
 
   getEnabledProviders(): MarketDataProvider[] {
-    const enabled = this.configService
-      .get<string>('PROVIDERS_ENABLED', 'binance')
-      .split(',')
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean);
+    const enabled = this.getProviderList(
+      'MARKET_DATA_ENABLED_PROVIDERS',
+      'binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp',
+    );
 
     return this.providers.filter((provider) => enabled.includes(provider.provider));
+  }
+
+  getWsEnabledProviders(): MarketDataProvider[] {
+    const enabled = this.getProviderList(
+      'MARKET_DATA_WS_ENABLED_PROVIDERS',
+      'binance,bybit,okx,coinbase,kraken',
+    );
+    return this.getEnabledProviders().filter(
+      (provider) => provider.supportsWebsocket && enabled.includes(provider.provider),
+    );
+  }
+
+  getProviderByName(name: string): MarketDataProvider | undefined {
+    const normalized = name.trim().toLowerCase();
+    return this.providers.find((provider) => provider.provider === normalized);
   }
 
   async startAll(): Promise<void> {
     const enabledProviders = this.getEnabledProviders();
     for (const provider of enabledProviders) {
       try {
-        await provider.connect();
+        await provider.start();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         this.logger.warn(
@@ -41,11 +55,19 @@ export class ProviderRegistryService {
 
   async stopAll(): Promise<void> {
     for (const provider of this.providers) {
-      await provider.disconnect();
+      await provider.stop();
     }
   }
 
   getSnapshots(): ProviderSnapshot[] {
     return this.providers.map((provider) => provider.getSnapshot());
+  }
+
+  private getProviderList(key: string, fallback: string): string[] {
+    const raw = this.configService.get<string>(key, fallback);
+    return raw
+      .split(',')
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
   }
 }

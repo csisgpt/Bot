@@ -43,9 +43,9 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.timer = setInterval(() => {
-      void this.fetchOnce();
+      void this.fetchAndStoreOnce();
     }, this.intervalMs);
-    void this.fetchOnce();
+    void this.fetchAndStoreOnce();
   }
 
   onModuleDestroy(): void {
@@ -54,16 +54,20 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async fetchOnce(): Promise<void> {
+  async fetchAndStoreOnce(): Promise<void> {
     const enabledProviders = this.configService
-      .get<string>('PROVIDERS_ENABLED', 'binance')
+      .get<string>('NEWS_ENABLED_PROVIDERS', 'binance,bybit,okx')
       .split(',')
       .map((item) => item.trim().toLowerCase())
       .filter(Boolean);
+    const availableProviders = new Set(this.providers.map((provider) => provider.provider));
+    const allowedProviders = enabledProviders.filter((provider) =>
+      availableProviders.has(provider),
+    );
 
     let totalStored = 0;
     for (const provider of this.providers) {
-      if (!enabledProviders.includes(provider.provider)) {
+      if (!allowedProviders.includes(provider.provider)) {
         continue;
       }
       try {

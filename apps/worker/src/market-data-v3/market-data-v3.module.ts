@@ -5,6 +5,7 @@ import { MarketDataModule } from '@libs/market-data';
 import { MarketDataModule as LegacyMarketDataModule } from '../market-data/market-data.module';
 import { MarketDataIngestService } from './market-data-ingest.service';
 import { ActiveSymbolsService } from './active-symbols.service';
+import { MarketDataCacheService } from './market-data-cache.service';
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { ActiveSymbolsService } from './active-symbols.service';
     LegacyMarketDataModule,
     BullModule.registerQueue({ name: MARKET_DATA_QUEUE_NAME }),
   ],
-  providers: [MarketDataIngestService, ActiveSymbolsService],
-  exports: [ActiveSymbolsService],
+  providers: [MarketDataIngestService, ActiveSymbolsService, MarketDataCacheService],
+  exports: [ActiveSymbolsService, MarketDataCacheService],
 })
 export class MarketDataV3Module {}

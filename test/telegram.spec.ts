@@ -20,6 +20,6 @@ describe('telegram formatter', () => {
     };
 
     const message = formatSignalMessage(signal);
-    expect(message).toContain('<b>Price:</b> N/A');
+    expect(message).toContain('<b>قیمت:</b> نامشخص');
   });
 });

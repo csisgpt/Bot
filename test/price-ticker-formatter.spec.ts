@@ -12,8 +12,8 @@ describe('price ticker formatter', () => {
       timestamp,
     );
 
-    expect(message).toContain('🟡 Price Ticker (Binance)');
-    expect(message).toContain('2025-12-25 18:10:00 UTC');
+    expect(message).toContain('🟡 تیکر قیمت (بایننس)');
+    expect(message).toContain('2025-12-25 18:10:00 (UTC)');
     expect(message).toContain('XAUTUSDT: 2301.5500');
     expect(message).toContain('BTCUSDT: 98234.1200');
   });

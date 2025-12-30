@@ -17,6 +17,7 @@ import {
   EnabledFeatures,
 } from './policy/policy-engine';
 import { getModePreset, normalizeMode } from './policy/mode-presets';
+import { SignalsFeedPublisherService } from './signals-feed-publisher.service';
 
 const RATE_LIMIT_TTL_SECONDS = 2 * 60 * 60;
 const STATS_BUCKET_TTL_SECONDS = 60 * 60;
@@ -34,12 +35,21 @@ export class NotificationOrchestratorService {
     private readonly redisService: RedisService,
     private readonly deliveryRepository: NotificationDeliveryRepository,
     private readonly formatter: MessageFormatterService,
+    private readonly signalsFeedPublisher: SignalsFeedPublisherService,
     @InjectQueue(SIGNALS_QUEUE_NAME)
     private readonly signalsQueue: Queue,
   ) {}
 
   async handleSignalCreated(signalId: string): Promise<void> {
     await this.handleEntity('SIGNAL', signalId);
+    try {
+      await this.signalsFeedPublisher.publishSignal(signalId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(
+        JSON.stringify({ event: 'signal_feed_publish_failed', signalId, message }),
+      );
+    }
   }
 
   async handleNewsCreated(newsId: string): Promise<void> {
@@ -184,6 +194,16 @@ export class NotificationOrchestratorService {
       const cooldownHit = rateLimitHit
         ? false
         : await this.checkCooldown(targetChatId, entityType, entity, preferences);
+      if (rateLimitHit) {
+        await this.recordSkipped(entityType, entityId, targetChatId, 'rate_limit');
+        this.bumpSkip(summary, 'rate_limit');
+        continue;
+      }
+      if (cooldownHit) {
+        await this.recordSkipped(entityType, entityId, targetChatId, 'cooldown');
+        this.bumpSkip(summary, 'cooldown');
+        continue;
+      }
       const decision = evaluatePolicy({
         entityType,
         preferences,
@@ -192,8 +212,8 @@ export class NotificationOrchestratorService {
         signal: entityType === 'SIGNAL' ? (entity as SignalSnapshot) : undefined,
         news: entityType === 'NEWS' ? (entity as NewsSnapshot) : undefined,
         arb: entityType === 'ARB' ? (entity as ArbSnapshot) : undefined,
-        rateLimitHit,
-        cooldownHit,
+        rateLimitHit: false,
+        cooldownHit: false,
       });
 
       if (decision.action !== 'ALLOW') {

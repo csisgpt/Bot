@@ -25,6 +25,7 @@ import { MarketDataProcessor } from './queues/market-data.processor';
 import { NotificationsModule } from './notifications/notifications.module';
 import { MarketDataModule as WorkerMarketDataModule } from './market-data/market-data.module';
 import { MarketDataModule as ProvidersMarketDataModule } from '@libs/market-data';
+import { FeedsModule } from './feeds/feeds.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { MarketDataModule as ProvidersMarketDataModule } from '@libs/market-data
     ArbitrageModule,
     NewsModule,
     NotificationsModule,
+    FeedsModule,
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [CoreModule],

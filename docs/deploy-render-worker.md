@@ -15,6 +15,7 @@ corepack enable && pnpm install --no-frozen-lockfile && pnpm build:worker
 ```
 pnpm start:worker:prod
 ```
+(`start:worker:prod` resolves the built worker entrypoint via `scripts/run-worker.js`.)
 
 **Health check path:**
 ```

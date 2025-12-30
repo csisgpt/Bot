@@ -3,10 +3,17 @@ import { ArbOpportunity, Candle, InstrumentMapping, NewsItem, ProviderSnapshot, 
 
 export interface MarketDataProvider extends EventEmitter {
   provider: string;
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
+  supportsWebsocket: boolean;
+  start(): Promise<void>;
+  stop(): Promise<void>;
   subscribeTickers(instruments: InstrumentMapping[]): Promise<void>;
   subscribeCandles(instruments: InstrumentMapping[], timeframes: string[]): Promise<void>;
+  fetchTickers(instruments: InstrumentMapping[]): Promise<Ticker[]>;
+  fetchCandles(
+    instrument: InstrumentMapping,
+    timeframe: string,
+    limit: number,
+  ): Promise<Candle[]>;
   getSnapshot(): ProviderSnapshot;
 }
 
