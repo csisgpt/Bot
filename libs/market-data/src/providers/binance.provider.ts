@@ -23,6 +23,8 @@ export class BinanceMarketDataProvider extends BaseWsProvider implements MarketD
   private includeMiniTicker = false;
   private streams: string[] = [];
   private readonly restClient;
+  private refreshTimer?: NodeJS.Timeout;
+  private restartAfterConnect = false;
 
   constructor(private readonly configService: ConfigService) {
     const endpoints = getProviderEndpoints(configService, 'binance');
@@ -53,31 +55,47 @@ export class BinanceMarketDataProvider extends BaseWsProvider implements MarketD
   }
 
   async fetchTickers(instruments: InstrumentMapping[]): Promise<Ticker[]> {
-    if (!instruments.length) {
-      return [];
+    if (!instruments.length) return [];
+  
+    const mapBySymbol = new Map<string, InstrumentMapping>();
+    for (const m of instruments) {
+      mapBySymbol.set(m.providerSymbol.toLowerCase(), m);
     }
-    const symbols = instruments.map((mapping) => mapping.providerSymbol.toUpperCase());
+  
+    const symbols = instruments.map((m) => m.providerSymbol.toUpperCase());
+  
     const response = await retry(() =>
       this.restClient.get('/api/v3/ticker/bookTicker', {
-        params: { symbols: JSON.stringify(symbols) },
+        params: symbols.length === 1
+          ? { symbol: symbols[0] }
+          : { symbols: JSON.stringify(symbols) },
       }),
     );
+  
     const now = Date.now();
-    const data = response.data as Array<{ symbol: string; bidPrice: string; askPrice: string }>;
-    return data
+  
+    const raw = response.data as any;
+    const rows: Array<{ symbol: string; bidPrice: string; askPrice: string }> =
+      Array.isArray(raw) ? raw : raw ? [raw] : [];
+  
+    return rows
       .map((item) => {
-        const mapping = this.tickerMappings.get(item.symbol.toLowerCase()) ??
-          instruments.find((candidate) => candidate.providerSymbol.toUpperCase() === item.symbol);
-        if (!mapping) {
-          return null;
-        }
+        const mapping =
+          mapBySymbol.get(String(item.symbol).toLowerCase()) ??
+          this.tickerMappings.get(String(item.symbol).toLowerCase());
+  
+        if (!mapping) return null;
+  
         return normalizeBinanceBookTicker(
           { s: item.symbol, b: item.bidPrice, a: item.askPrice, E: now },
           mapping,
         );
       })
-      .filter((ticker): ticker is Ticker => Boolean(ticker));
+      .filter((t): t is Ticker => Boolean(t));
   }
+  
+
+  
 
   async fetchCandles(
     instrument: InstrumentMapping,
@@ -117,40 +135,67 @@ export class BinanceMarketDataProvider extends BaseWsProvider implements MarketD
     this.logger.log(
       JSON.stringify({ event: 'provider_connected', provider: this.provider, streams: this.streams.length }),
     );
+
+    if (this.restartAfterConnect) {
+      this.restartAfterConnect = false;
+      setTimeout(() => {
+        void this.stop().then(() => this.start());
+      }, 0);
+    }
   }
+
 
   protected onMessage(data: WebSocket.RawData): void {
     const raw = typeof data === 'string' ? data : data.toString();
     let message: BinanceCombinedMessage | null = null;
+  
     try {
       message = JSON.parse(raw) as BinanceCombinedMessage;
-    } catch (error) {
+    } catch {
       this.failures += 1;
       return;
     }
-    if (!message?.data) {
-      return;
-    }
+  
+    if (!message?.data) return;
+  
+    // ✅ bookTicker: can be ARRAY for !bookTicker streams
     if (message.stream?.includes('bookTicker')) {
-      const payload = message.data as { s: string; b: string; a: string; E?: number };
-      const mapping = this.tickerMappings.get(payload.s?.toLowerCase());
-      if (!mapping) {
-        return;
-      }
-      const ticker = normalizeBinanceBookTicker(payload, mapping);
-      if (ticker) {
-        this.emit('ticker', ticker as Ticker);
+      const now = Date.now();
+      const payloadAny = message.data as any;
+  
+      const items: Array<{ s: string; b: string; a: string; E?: number }> =
+        Array.isArray(payloadAny) ? payloadAny : [payloadAny];
+  
+      for (const payload of items) {
+        const s = payload?.s;
+        if (!s) continue;
+  
+        const mapping = this.tickerMappings.get(String(s).toLowerCase());
+        if (!mapping) continue;
+  
+        const ticker = normalizeBinanceBookTicker(
+          { s, b: payload.b, a: payload.a, E: payload.E ?? now },
+          mapping,
+        );
+  
+        if (ticker) this.emit('ticker', ticker as Ticker);
       }
       return;
     }
-
+  
+    // ✅ miniTicker array (optional, if you want later)
+    if (message.stream?.includes('miniTicker')) {
+      // if you ever normalize miniTicker, handle array here similarly
+      return;
+    }
+  
+    // candles
     if (message.stream?.includes('@kline_')) {
       const kline = message.data?.k;
       const symbol = message.data?.s ?? kline?.s;
       const mapping = symbol ? this.candleMappings.get(String(symbol).toLowerCase()) : undefined;
-      if (!mapping || !kline) {
-        return;
-      }
+      if (!mapping || !kline) return;
+  
       const candle: Candle = {
         provider: this.provider,
         canonicalSymbol: mapping.canonicalSymbol,
@@ -163,6 +208,7 @@ export class BinanceMarketDataProvider extends BaseWsProvider implements MarketD
         volume: Number(kline.v),
         isFinal: Boolean(kline.x),
       };
+  
       if ([candle.open, candle.high, candle.low, candle.close, candle.volume, candle.openTime].every(Number.isFinite)) {
         this.emit('candle', candle);
       }
@@ -176,21 +222,47 @@ export class BinanceMarketDataProvider extends BaseWsProvider implements MarketD
   }
 
   private async refreshStreams(): Promise<void> {
-    const streams: string[] = ['!bookTicker'];
-    if (this.includeMiniTicker) {
-      streams.push('!miniTicker@arr');
-    }
-    if (this.timeframes.length && this.candleMappings.size) {
-      for (const [symbol] of this.candleMappings) {
-        for (const timeframe of this.timeframes) {
-          streams.push(`${symbol}@kline_${timeframe}`);
+    // debounce to avoid multiple stop/start in same tick
+    if (this.refreshTimer) return;
+  
+    this.refreshTimer = setTimeout(async () => {
+      this.refreshTimer = undefined;
+  
+      const nextStreams: string[] = ['!bookTicker'];
+  
+      if (this.includeMiniTicker) {
+        nextStreams.push('!miniTicker@arr');
+      }
+  
+      if (this.timeframes.length && this.candleMappings.size) {
+        for (const [symbol] of this.candleMappings) {
+          for (const timeframe of this.timeframes) {
+            nextStreams.push(`${symbol}@kline_${timeframe}`);
+          }
         }
       }
-    }
-    this.streams = streams;
-    if (this.ws) {
+  
+      // If no change, do nothing
+      const same =
+        nextStreams.length === this.streams.length &&
+        nextStreams.every((v, i) => v === this.streams[i]);
+      if (same) return;
+  
+      this.streams = nextStreams;
+  
+      // If ws doesn't exist yet, start() will use correct streams
+      if (!this.ws) return;
+  
+      // If we are still connecting, do NOT stop/terminate now.
+      // Let it connect, then restart once onOpen fires.
+      if (this.ws.readyState === WebSocket.CONNECTING) {
+        this.restartAfterConnect = true;
+        return;
+      }
+  
       await this.stop();
       await this.start();
-    }
+    }, 0) as unknown as NodeJS.Timeout;
   }
+  
 }

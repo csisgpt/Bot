@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import { Candle, InstrumentMapping, NewsItem, Ticker } from './models';
 
 export const normalizeBinanceBookTicker = (

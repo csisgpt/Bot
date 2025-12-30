@@ -14,8 +14,18 @@ import {
   ProviderRegistryService,
   normalizeCanonicalSymbol,
   providerSymbolFromCanonical,
+  Ticker,
 } from '@libs/market-data';
 import { MarketDataCacheService } from '../market-data-v3/market-data-cache.service';
+
+const asStringList = (v: unknown): string[] => {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.map(String).map((x) => x.trim()).filter(Boolean);
+  if (typeof v === 'string') return v.split(',').map((x) => x.trim()).filter(Boolean);
+  return [String(v)].map((x) => x.trim()).filter(Boolean);
+};
+
+const uniq = (arr: string[]) => Array.from(new Set(arr));
 
 @Injectable()
 export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
@@ -30,18 +40,16 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
     private readonly telegramPublisher: TelegramPublisherService,
     private readonly newsFetcher: NewsFetcherService,
     private readonly marketDataCache: MarketDataCacheService,
-  ) {}
+  ) { }
 
   onModuleInit(): void {
     for (const feed of feedsConfig) {
+      console.log('helllooooooooooooooo there')
+      console.log(feed)
       if (!feed.enabled) continue;
-      if (!feed.schedule) {
-        continue;
-      }
+      if (!feed.schedule) continue;
 
-      const job = new CronJob(feed.schedule, () => {
-        void this.runFeed(feed);
-      });
+      const job = new CronJob(feed.schedule, () => void this.runFeed(feed));
       this.schedulerRegistry.addCronJob(feed.id, job);
       job.start();
       this.logger.log(`Registered feed ${feed.id} (${feed.type}) @ ${feed.schedule}`);
@@ -59,59 +67,82 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
   private async runFeed(feed: FeedConfig): Promise<void> {
     const runId = randomUUID();
     const startedAt = Date.now();
-    this.logger.log(
-      JSON.stringify({ event: 'feed_run_start', feedId: feed.id, runId, type: feed.type }),
-    );
+
+    this.logger.log(JSON.stringify({ event: 'feed_run_start', feedId: feed.id, runId, type: feed.type }));
 
     try {
-      if (feed.type === 'prices') {
-        await this.runPricesFeed(feed, runId);
-      }
-      if (feed.type === 'news') {
-        await this.runNewsFeed(feed, runId);
+      switch (feed.type) {
+        case 'prices':
+          await this.runPricesFeed(feed as PricesFeedConfig, runId);
+          break;
+        case 'news':
+          await this.runNewsFeed(feed as NewsFeedConfig, runId);
+          break;
+        default:
+          this.logger.warn(JSON.stringify({ event: 'feed_unknown_type', feedId: feed.id, runId, type: (feed as any).type }));
+          break;
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(
-        JSON.stringify({ event: 'feed_run_failed', feedId: feed.id, runId, message }),
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(JSON.stringify({ event: 'feed_run_failed', feedId: feed.id, runId, message }));
     } finally {
-      const durationMs = Date.now() - startedAt;
-      this.logger.log(
-        JSON.stringify({ event: 'feed_run_end', feedId: feed.id, runId, durationMs }),
-      );
+      this.logger.log(JSON.stringify({ event: 'feed_run_end', feedId: feed.id, runId, durationMs: Date.now() - startedAt }));
     }
+  }
+
+  private resolveDestinations(feed: FeedConfig): string[] {
+    // feed.destinations can be string[] from config file, keep it safe anyway:
+    const direct = asStringList((feed as any).destinations);
+    if (direct.length > 0) return uniq(direct);
+
+    const key =
+      feed.type === 'prices'
+        ? 'FEED_PRICES_DESTINATIONS'
+        : feed.type === 'news'
+          ? 'FEED_NEWS_DESTINATIONS'
+          : 'FEED_SIGNALS_DESTINATIONS';
+
+    // env.schema might parse it to string[] already (csv()) — so get<unknown>
+    const raw = this.configService.get<unknown>(key);
+    return uniq(asStringList(raw));
   }
 
   private async runPricesFeed(feed: PricesFeedConfig, runId: string): Promise<void> {
     const destinations = this.resolveDestinations(feed);
     if (destinations.length === 0) {
-      this.logger.warn(
-        JSON.stringify({ event: 'feed_no_destinations', feedId: feed.id, runId }),
-      );
+      this.logger.warn(JSON.stringify({ event: 'feed_no_destinations', feedId: feed.id, runId }));
       return;
     }
 
-    const symbols = feed.options.symbols.map(normalizeCanonicalSymbol).filter(Boolean);
+    const symbols = uniq(feed.options.symbols.map(normalizeCanonicalSymbol).filter(Boolean));
+    if (symbols.length === 0) {
+      this.logger.warn(JSON.stringify({ event: 'feed_no_symbols', feedId: feed.id, runId }));
+      return;
+    }
+
     const providers = feed.options.providers.length
       ? feed.options.providers
-          .map((name) => this.providerRegistry.getProviderByName(name))
-          .filter((provider): provider is NonNullable<typeof provider> => Boolean(provider))
+        .map((name) => this.providerRegistry.getProviderByName(name))
+        .filter((p): p is NonNullable<typeof p> => Boolean(p))
       : this.providerRegistry.getEnabledProviders();
 
     if (providers.length === 0) {
-      this.logger.warn(
-        JSON.stringify({ event: 'feed_no_providers', feedId: feed.id, runId }),
-      );
+      this.logger.warn(JSON.stringify({ event: 'feed_no_providers', feedId: feed.id, runId }));
       return;
     }
 
     const tickersBySymbol = new Map<string, Array<{ provider: string; price: number }>>();
+
     for (const provider of providers) {
-      const cached = await this.marketDataCache.getTickers(provider.provider, symbols);
-      const missingSymbols = symbols.filter((symbol) => !cached.has(symbol.toUpperCase()));
+      const providerName = provider.provider;
+
+      // read cache first
+      const cached = await this.marketDataCache.getTickers(providerName, symbols);
+      const missingSymbols = symbols.filter((s) => !cached.has(s.toUpperCase()));
+
+      // fallback to REST only for missing (with provider-specific symbol mapping)
       if (missingSymbols.length > 0) {
-        const mappings = this.buildMappings(provider.provider, missingSymbols);
+        const mappings = this.buildMappings(providerName, missingSymbols);
         if (mappings.length > 0) {
           try {
             const tickers = await this.fetchTickersInBatches(provider, mappings);
@@ -124,7 +155,7 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
                 last: ticker.last ?? null,
                 ts: ticker.ts,
               });
-              cached.set(ticker.canonicalSymbol, {
+              cached.set(ticker.canonicalSymbol.toUpperCase(), {
                 provider: ticker.provider,
                 symbol: ticker.canonicalSymbol,
                 bid: ticker.bid ?? null,
@@ -134,13 +165,13 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
               });
             }
           } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
+            const message = error instanceof Error ? error.message : String(error);
             this.logger.warn(
               JSON.stringify({
                 event: 'feed_cache_fallback_failed',
                 feedId: feed.id,
                 runId,
-                provider: provider.provider,
+                provider: providerName,
                 message,
               }),
             );
@@ -148,31 +179,22 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
+
+      // aggregate from cache
       for (const symbol of symbols) {
         const cachedTicker = cached.get(symbol.toUpperCase());
-        if (!cachedTicker || cachedTicker.last === null || !Number.isFinite(cachedTicker.last)) {
-          continue;
-        }
-        if (!tickersBySymbol.has(symbol)) {
-          tickersBySymbol.set(symbol, []);
-        }
-        tickersBySymbol.get(symbol)?.push({
-          provider: provider.provider,
-          price: cachedTicker.last,
-        });
+        if (!cachedTicker || cachedTicker.last === null || !Number.isFinite(cachedTicker.last)) continue;
+        if (!tickersBySymbol.has(symbol)) tickersBySymbol.set(symbol, []);
+        tickersBySymbol.get(symbol)!.push({ provider: providerName, price: cachedTicker.last });
       }
     }
 
     const aggregations = Array.from(tickersBySymbol.entries()).map(([symbol, entries]) => {
-      const prices = entries.map((entry) => entry.price).filter(Number.isFinite);
+      const prices = entries.map((e) => e.price).filter(Number.isFinite);
       const min = Math.min(...prices);
       const max = Math.max(...prices);
       const spreadPct = prices.length > 1 && min > 0 ? ((max - min) / min) * 100 : null;
-      return {
-        symbol,
-        entries,
-        spreadPct,
-      };
+      return { symbol, entries, spreadPct };
     });
 
     const message = formatPricesFeedMessage({
@@ -185,15 +207,13 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
       await this.telegramPublisher.sendMessage(chatId, message, { parseMode: 'HTML' });
     }
 
-    this.logger.log(
-      JSON.stringify({
-        event: 'feed_prices_sent',
-        feedId: feed.id,
-        runId,
-        symbols: symbols.length,
-        destinations: destinations.length,
-      }),
-    );
+    this.logger.log(JSON.stringify({
+      event: 'feed_prices_sent',
+      feedId: feed.id,
+      runId,
+      symbols: symbols.length,
+      destinations: destinations.length,
+    }));
   }
 
   private buildMappings(provider: string, symbols: string[]): InstrumentMapping[] {
@@ -202,9 +222,7 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
         const canonicalSymbol = normalizeCanonicalSymbol(symbol);
         const mapping = providerSymbolFromCanonical(provider, canonicalSymbol);
         if (!mapping) {
-          this.logger.warn(
-            JSON.stringify({ event: 'feed_symbol_mapping_failed', provider, symbol }),
-          );
+          this.logger.warn(JSON.stringify({ event: 'feed_symbol_mapping_failed', provider, symbol: canonicalSymbol }));
           return null;
         }
         return {
@@ -216,15 +234,13 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
           isActive: true,
         } as InstrumentMapping;
       })
-      .filter((mapping): mapping is InstrumentMapping => Boolean(mapping));
+      .filter((m): m is InstrumentMapping => Boolean(m));
   }
 
   private async runNewsFeed(feed: NewsFeedConfig, runId: string): Promise<void> {
     const destinations = this.resolveDestinations(feed);
     if (destinations.length === 0) {
-      this.logger.warn(
-        JSON.stringify({ event: 'feed_no_destinations', feedId: feed.id, runId }),
-      );
+      this.logger.warn(JSON.stringify({ event: 'feed_no_destinations', feedId: feed.id, runId }));
       return;
     }
 
@@ -232,17 +248,10 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
 
     const lastTsRaw = await this.redisService.get(`feed:last_news_ts:${feed.id}`);
     const lastTs = lastTsRaw ? Number(lastTsRaw) : null;
-    const whereClause: {
-      ts?: { gt: Date };
-      provider?: { in: string[] };
-    } = {};
 
-    if (lastTs) {
-      whereClause.ts = { gt: new Date(lastTs) };
-    }
-    if (feed.options.providers.length > 0) {
-      whereClause.provider = { in: feed.options.providers };
-    }
+    const whereClause: { ts?: { gt: Date }; provider?: { in: string[] } } = {};
+    if (lastTs) whereClause.ts = { gt: new Date(lastTs) };
+    if (feed.options.providers.length > 0) whereClause.provider = { in: feed.options.providers };
 
     const newsItems = await this.prismaService.news.findMany({
       where: whereClause,
@@ -251,15 +260,12 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (newsItems.length === 0) {
-      this.logger.log(
-        JSON.stringify({ event: 'feed_news_empty', feedId: feed.id, runId }),
-      );
+      this.logger.log(JSON.stringify({ event: 'feed_news_empty', feedId: feed.id, runId }));
       return;
     }
 
-    const ordered = [...newsItems].reverse();
     const message = formatNewsFeedMessage({
-      items: ordered.map((item) => ({
+      items: [...newsItems].reverse().map((item) => ({
         title: item.title,
         url: item.url,
         provider: item.provider,
@@ -273,69 +279,53 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const newest = newsItems[0]?.ts?.getTime();
-    if (newest) {
-      await this.redisService.set(`feed:last_news_ts:${feed.id}`, String(newest));
-    }
+    if (newest) await this.redisService.set(`feed:last_news_ts:${feed.id}`, String(newest));
 
-    this.logger.log(
-      JSON.stringify({
-        event: 'feed_news_sent',
-        feedId: feed.id,
-        runId,
-        items: newsItems.length,
-        destinations: destinations.length,
-      }),
-    );
-  }
-
-  private resolveDestinations(feed: FeedConfig): string[] {
-    if (feed.destinations.length > 0) {
-      return feed.destinations;
-    }
-    const key =
-      feed.type === 'prices'
-        ? 'FEED_PRICES_DESTINATIONS'
-        : feed.type === 'news'
-        ? 'FEED_NEWS_DESTINATIONS'
-        : 'FEED_SIGNALS_DESTINATIONS';
-    const raw = this.configService.get<string>(key, '');
-    return raw
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
+    this.logger.log(JSON.stringify({
+      event: 'feed_news_sent',
+      feedId: feed.id,
+      runId,
+      items: newsItems.length,
+      destinations: destinations.length,
+    }));
   }
 
   private async fetchTickersInBatches(
-    provider: { fetchTickers: (mappings: InstrumentMapping[]) => Promise<any[]> },
+    provider: { provider: string; fetchTickers: (m: InstrumentMapping[]) => Promise<Ticker[]> },
     mappings: InstrumentMapping[],
-  ): Promise<any[]> {
-    if (!mappings.length) {
-      return [];
-    }
-    const batchSize = Math.max(
-      1,
-      this.configService.get<number>('MARKET_DATA_REST_TICKER_BATCH_SIZE', 10),
-    );
-    const concurrency = Math.max(
-      1,
-      this.configService.get<number>('MARKET_DATA_REST_TICKER_BATCH_CONCURRENCY', 2),
-    );
+  ): Promise<Ticker[]> {
+    if (!mappings.length) return [];
+
+    const batchSize = Math.max(1, this.configService.get<number>('MARKET_DATA_REST_TICKER_BATCH_SIZE', 10));
+    const concurrency = Math.max(1, this.configService.get<number>('MARKET_DATA_REST_TICKER_BATCH_CONCURRENCY', 2));
+
     const batches: InstrumentMapping[][] = [];
     for (let i = 0; i < mappings.length; i += batchSize) {
       batches.push(mappings.slice(i, i + batchSize));
     }
-    const results: any[] = [];
+
+    const results: Ticker[] = [];
     const queue = [...batches];
+
     const workers = Array.from({ length: concurrency }, async () => {
       while (queue.length) {
         const batch = queue.shift();
-        if (!batch) {
-          return;
+        if (!batch) return;
+        try {
+          const tickers = await provider.fetchTickers(batch);
+          results.push(...tickers);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          this.logger.warn(JSON.stringify({
+            event: 'feed_fetch_tickers_batch_failed',
+            provider: provider.provider,
+            batchSize: batch.length,
+            message,
+          }));
         }
-        const tickers = await provider.fetchTickers(batch);
-        results.push(...tickers);
       }
     });
+
     await Promise.all(workers);
     return results;
   }

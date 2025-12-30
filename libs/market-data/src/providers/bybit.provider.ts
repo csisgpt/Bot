@@ -129,8 +129,10 @@ export class BybitMarketDataProvider extends BaseWsProvider implements MarketDat
     }
     const args: string[] = [];
     if (this.tickerMappings.size) {
+      console.log(this.tickerMappings)
       for (const [symbol] of this.tickerMappings) {
         args.push(`tickers.${symbol}`);
+        console.log(symbol)
       }
     }
     if (this.candleMappings.size && this.timeframes.length) {

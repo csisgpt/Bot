@@ -43,7 +43,7 @@ export const feedsConfig: FeedConfig[] = [
     id: 'prices-default',
     enabled: true,
     type: 'prices',
-    schedule: '*/30 * * * * *',
+    schedule: '*/60 * * * * *',
     destinations: [],
     options: {
       providers: [
@@ -53,7 +53,7 @@ export const feedsConfig: FeedConfig[] = [
         'coinbase',
         'kraken',
       ],
-      symbols: ['BTCUSDT', 'ETHUSDT'],
+      symbols: ['BTCUSDT', 'ETHUSDT','XRPUSDT','SOLUSDT','ADAUSDT','DOGEUSDT','TRXUSDT','XAUTUSDT'],
       format: 'table',
       includeTimestamp: true,
     },
@@ -62,7 +62,7 @@ export const feedsConfig: FeedConfig[] = [
     id: 'news-default',
     enabled: true,
     type: 'news',
-    schedule: '*/5 * * * *',
+    schedule: '*/30 * * * * *',
     destinations: [],
     options: {
       providers: ['binance', 'bybit', 'okx'],

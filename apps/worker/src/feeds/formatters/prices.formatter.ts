@@ -6,6 +6,32 @@ export interface PriceAggregation {
   spreadPct?: number | null;
 }
 
+type PricesFeedFormat = 'table' | 'compact'; // برای سازگاری؛ "table" رو هم می‌گیریم ولی خروجی‌مون جدولی نیست.
+
+const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'] as const;
+
+const PROVIDER_META: Record<string, { label: string; emoji: string }> = {
+  binance: { label: 'Binance', emoji: '🟡' },
+  bybit: { label: 'Bybit', emoji: '🟠' },
+  okx: { label: 'OKX', emoji: '⚫️' },
+  kucoin: { label: 'KuCoin', emoji: '🟢' },
+  kraken: { label: 'Kraken', emoji: '🟣' },
+  coinbase: { label: 'Coinbase', emoji: '🔵' },
+  mexc: { label: 'MEXC', emoji: '🟦' },
+  gate: { label: 'Gate', emoji: '🟥' },
+};
+
+const normalizeProviderKey = (p: string) => p.trim().toLowerCase();
+
+const providerDisplay = (provider: string): { text: string; emoji: string } => {
+  const key = normalizeProviderKey(provider);
+  const meta = PROVIDER_META[key];
+  const safeLabel = escapeHtml(meta?.label ?? provider.trim());
+  return { text: safeLabel, emoji: meta?.emoji ?? '🏦' };
+};
+
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
 const formatPrice = (value: number): string =>
   new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
@@ -13,47 +39,134 @@ const formatPrice = (value: number): string =>
   }).format(value);
 
 const formatSpread = (value?: number | null): string => {
-  if (value === undefined || value === null || Number.isNaN(value)) {
-    return 'N/A';
-  }
+  if (!isFiniteNumber(value)) return 'N/A';
+  // 0.34 -> "0.34%"
   return `${value.toFixed(2)}%`;
+};
+
+const spreadBadge = (value?: number | null): string => {
+  if (!isFiniteNumber(value)) return '⚪️ <i>N/A</i>';
+  if (value <= 0.15) return `🟢 <b>${formatSpread(value)}</b>`;
+  if (value <= 0.5) return `🟡 <b>${formatSpread(value)}</b>`;
+  return `🔴 <b>${formatSpread(value)}</b>`;
 };
 
 const formatTimestamp = (timestamp: number): string =>
   new Date(timestamp).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 
+/**
+ * اگر symbol به شکل BTCUSDT باشد، به BTC/USDT تبدیل می‌کند (برای خوانایی).
+ * اگر نتوانست تشخیص بدهد، همان را برمی‌گرداند.
+ */
+const prettySymbol = (raw: string): string => {
+  const s = raw.trim().toUpperCase();
+  for (const q of QUOTE_ASSETS) {
+    if (s.length > q.length && s.endsWith(q)) {
+      const base = s.slice(0, -q.length);
+      if (base) return `${base}/${q}`;
+    }
+  }
+  return s;
+};
+
+const divider = '────────────';
+
+const cleanLines = (lines: string[]) =>
+  lines
+    .map((x) => x.trimEnd())
+    .filter((line, i, arr) => !(line === '' && arr[i - 1] === ''))
+    .join('\n');
+
 export const formatPricesFeedMessage = (params: {
   aggregations: PriceAggregation[];
-  format: 'table' | 'compact';
+  format: PricesFeedFormat;
   includeTimestamp: boolean;
   timestamp?: number;
 }): string => {
   const { aggregations, format, includeTimestamp, timestamp = Date.now() } = params;
-  const lines: string[] = ['🧭 <b>Market Prices</b>'];
 
-  if (includeTimestamp) {
-    lines.push(`<i>${formatTimestamp(timestamp)}</i>`);
-  }
+  const header: string[] = [];
+  header.push('🧭 <b>چنده؟</b>  <i>Price Snapshot</i>');
+  if (includeTimestamp) header.push(`🕒 <i>${formatTimestamp(timestamp)}</i>`);
+  header.push(divider);
 
-  for (const aggregation of aggregations) {
-    const symbol = escapeHtml(aggregation.symbol);
-    if (format === 'compact') {
-      const providerBits = aggregation.entries
-        .map((entry) => `${escapeHtml(entry.provider)} ${formatPrice(entry.price)}`)
-        .join(' | ');
-      lines.push(
-        `${symbol} | ${providerBits} | Spread ${formatSpread(aggregation.spreadPct)}`,
+  const blocks: string[] = [];
+
+  for (const ag of aggregations) {
+    const symbol = escapeHtml(prettySymbol(ag.symbol));
+
+    const entries = (ag.entries ?? [])
+      .filter((e) => isFiniteNumber(e.price))
+      .map((e) => ({
+        provider: e.provider,
+        price: e.price,
+        key: normalizeProviderKey(e.provider),
+      }))
+      .sort((a, b) => a.price - b.price);
+
+    if (entries.length === 0) {
+      blocks.push(
+        [
+          `🔹 <b>${symbol}</b>`,
+          `⚠️ <i>هیچ قیمتی از پرووایدرها نرسید</i>`,
+        ].join('\n'),
       );
+      blocks.push(divider);
       continue;
     }
 
-    lines.push(`<b>${symbol}</b>`);
-    for (const entry of aggregation.entries) {
-      lines.push(`• ${escapeHtml(entry.provider)}: ${formatPrice(entry.price)}`);
-    }
-    lines.push(`Spread: ${formatSpread(aggregation.spreadPct)}`);
-    lines.push('');
+    const low = entries[0];
+    const high = entries[entries.length - 1];
+    const best = low; // پایین‌ترین قیمت به‌عنوان Best (می‌تونی اگر خواستی “میانه/میانگین” بذاری)
+
+    const bestP = providerDisplay(best.provider);
+    const rangeText =
+      entries.length >= 2
+        ? `↕️ <i>Range</i>: <code>${formatPrice(low.price)}</code> تا <code>${formatPrice(
+            high.price,
+          )}</code>`
+        : `↕️ <i>Range</i>: <code>${formatPrice(best.price)}</code>`;
+
+    const spreadText = `📊 <i>Spread</i>: ${spreadBadge(ag.spreadPct)}  <i>(${formatSpread(
+      ag.spreadPct,
+    )})</i>`;
+
+    // فهرست پرووایدرها (بدون حس جدول)
+    const providerLines =
+      format === 'compact'
+        ? // compact: حداکثر 3 مورد (بهترین + چندتا از بقیه)
+          entries
+            .slice(0, Math.min(3, entries.length))
+            .map((e, idx) => {
+              const p = providerDisplay(e.provider);
+              const tag = idx === 0 ? '🏷️ <i>Best</i>' : '•';
+              return `${tag} ${p.emoji} <b>${p.text}</b> — <code>${formatPrice(e.price)}</code>`;
+            })
+        : // "table" => detailed ولی غیرجدولی
+          entries.map((e, idx) => {
+            const p = providerDisplay(e.provider);
+            const isBest = idx === 0;
+            const bullet = isBest ? '🏷️ <i>Best</i>' : '•';
+            return `${bullet} ${p.emoji} <b>${p.text}</b> — <code>${formatPrice(e.price)}</code>`;
+          });
+
+    const block: string[] = [];
+    block.push(`🔹 <b>${symbol}</b>`);
+    block.push(
+      `💰 <i>Best</i>: <code>${formatPrice(best.price)}</code>  <i>via</i> ${bestP.emoji} <b>${bestP.text}</b>`,
+    );
+    block.push(rangeText);
+    block.push(spreadText);
+    block.push(''); // فاصله نرم
+    block.push('🧩 <i>Providers</i>');
+    block.push(...providerLines);
+
+    blocks.push(block.join('\n'));
+    blocks.push(divider);
   }
 
-  return lines.filter((line, index, arr) => !(line === '' && arr[index - 1] === '')).join('\n');
+  // حذف divider اضافه‌ی آخر
+  if (blocks.length && blocks[blocks.length - 1] === divider) blocks.pop();
+
+  return cleanLines([...header, ...blocks]);
 };

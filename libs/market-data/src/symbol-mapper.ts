@@ -1,31 +1,113 @@
 import { Instrument } from './models';
 
-const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'];
+const QUOTE_ASSETS = [
+  // IMPORTANT: longest first to avoid USD matching before USDT/USDC
+  'USDT',
+  'USDC',
+  'USD',
+  'EUR',
+  'GBP',
+  'JPY',
+  'CHF',
+  'AUD',
+  'CAD',
+  'TRY',
+  'AED',
+  'BTC',
+  'ETH',
+];
+
 const BASE_ALIASES: Record<string, string> = {
   XBT: 'BTC',
   XETH: 'ETH',
 };
 
-export const normalizeCanonicalSymbol = (symbol: string): string =>
+const PROVIDER_UNSUPPORTED_QUOTES: Record<string, string[]> = {
+  // Coinbase: USDT pair coverage is not reliable; prefer USD/USDC
+  coinbase: ['USDT'],
+};
+
+type QuoteFallbackMap = Record<string, Record<string, string>>;
+// provider -> { fromQuote -> toQuote }
+const PROVIDER_QUOTE_FALLBACKS: QuoteFallbackMap = {
+  // If canonical is BTCUSDT, coinbase can be BTC-USD or BTC-USDC depending on your preference
+  coinbase: { USDT: 'USD' },
+  // you can add more later if needed
+};
+
+const normalizeCanonicalSymbol = (symbol: string): string =>
   symbol
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '');
 
+export { normalizeCanonicalSymbol };
+
+const parseOverrides = (raw?: string): Record<string, string> => {
+  // format: "BTCUSDT:BTC-USD,ETHUSDT:ETH-USD"
+  const map: Record<string, string> = {};
+  if (!raw) return map;
+
+  raw
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .forEach((pair) => {
+      const [k, v] = pair.split(':').map((x) => x.trim());
+      if (k && v) map[normalizeCanonicalSymbol(k)] = v;
+    });
+
+  return map;
+};
+
+const getSortedQuotes = (): string[] =>
+  [...QUOTE_ASSETS].sort((a, b) => b.length - a.length);
+
 export const splitCanonicalSymbol = (
   symbol: string,
 ): { base: string; quote: string } | null => {
   const normalized = normalizeCanonicalSymbol(symbol);
-  for (const quote of QUOTE_ASSETS) {
+
+  for (const quote of getSortedQuotes()) {
     if (normalized.endsWith(quote)) {
-      const base = normalized.slice(0, -quote.length);
-      if (!base) {
-        return null;
-      }
-      return { base: BASE_ALIASES[base] ?? base, quote };
+      const baseRaw = normalized.slice(0, -quote.length);
+      if (!baseRaw) return null;
+
+      const base = BASE_ALIASES[baseRaw] ?? baseRaw;
+      return { base, quote };
     }
   }
   return null;
+};
+
+const applyQuoteRules = (
+  provider: string,
+  base: string,
+  quote: string,
+  overridesHit: boolean,
+  preferredQuote?: string,
+): { base: string; quote: string } | null => {
+  // If overridden, don't interfere
+  if (overridesHit) return { base, quote };
+
+  // If provider says quote unsupported, try fallback
+  const isUnsupported = PROVIDER_UNSUPPORTED_QUOTES[provider]?.includes(quote);
+
+  if (isUnsupported) {
+    // 1) Preferred quote (env-driven) has priority if given
+    if (preferredQuote) {
+      return { base, quote: preferredQuote.toUpperCase() };
+    }
+
+    // 2) Provider fallback map
+    const fb = PROVIDER_QUOTE_FALLBACKS[provider]?.[quote];
+    if (fb) return { base, quote: fb };
+
+    // 3) Otherwise skip
+    return null;
+  }
+
+  return { base, quote };
 };
 
 const toProviderSymbol = (provider: string, base: string, quote: string): string | null => {
@@ -34,22 +116,30 @@ const toProviderSymbol = (provider: string, base: string, quote: string): string
     case 'bybit':
     case 'mexc':
       return `${base}${quote}`;
+
     case 'okx':
     case 'coinbase':
     case 'kucoin':
       return `${base}-${quote}`;
+
     case 'kraken': {
       const krakenBase = base === 'BTC' ? 'XBT' : base;
+      // Kraken WS usually uses XBT/USD
       return `${krakenBase}/${quote}`;
     }
+
     case 'gateio':
       return `${base}_${quote}`;
+
     case 'bitfinex': {
+      // Bitfinex uses UST for USDT in some tickers (common normalization)
       const bitfinexQuote = quote === 'USDT' ? 'UST' : quote;
       return `t${base}${bitfinexQuote}`;
     }
+
     case 'bitstamp':
       return `${base}${quote}`.toLowerCase();
+
     default:
       return `${base}${quote}`;
   }
@@ -58,6 +148,7 @@ const toProviderSymbol = (provider: string, base: string, quote: string): string
 const toProviderInstId = (provider: string, base: string, quote: string): string | null => {
   switch (provider) {
     case 'kraken': {
+      // Kraken REST expects XBTUSD style pairs in many endpoints
       const krakenBase = base === 'BTC' ? 'XBT' : base;
       return `${krakenBase}${quote}`;
     }
@@ -69,25 +160,41 @@ const toProviderInstId = (provider: string, base: string, quote: string): string
 export const providerSymbolFromCanonical = (
   provider: string,
   symbol: string,
+  overridesRaw?: string,          // env: MARKET_DATA_SYMBOL_OVERRIDES_<PROVIDER>
+  preferredQuoteRaw?: string,     // env: MARKET_DATA_PREFERRED_QUOTE_<PROVIDER>  (e.g. USD)
 ): { providerSymbol: string; providerInstId: string } | null => {
   const parts = splitCanonicalSymbol(symbol);
-  if (!parts) {
-    return null;
+  if (!parts) return null;
+
+  const overrides = parseOverrides(overridesRaw);
+  const canonical = normalizeCanonicalSymbol(symbol);
+  const overridden = overrides[canonical];
+
+  if (overridden) {
+    return { providerSymbol: overridden, providerInstId: overridden };
   }
-  const providerSymbol = toProviderSymbol(provider, parts.base, parts.quote);
-  const providerInstId = toProviderInstId(provider, parts.base, parts.quote);
-  if (!providerSymbol || !providerInstId) {
-    return null;
-  }
+
+  const ruled = applyQuoteRules(
+    provider,
+    parts.base,
+    parts.quote,
+    /* overridesHit */ false,
+    preferredQuoteRaw,
+  );
+  if (!ruled) return null;
+
+  const providerSymbol = toProviderSymbol(provider, ruled.base, ruled.quote);
+  const providerInstId = toProviderInstId(provider, ruled.base, ruled.quote);
+  if (!providerSymbol || !providerInstId) return null;
+
   return { providerSymbol, providerInstId };
 };
 
 export const buildInstrumentFromSymbol = (symbol: string): Instrument | null => {
   const normalized = normalizeCanonicalSymbol(symbol);
   const parts = splitCanonicalSymbol(normalized);
-  if (!parts) {
-    return null;
-  }
+  if (!parts) return null;
+
   return {
     id: `${parts.base.toLowerCase()}-${parts.quote.toLowerCase()}`,
     assetType: normalized === 'XAUTUSDT' || normalized === 'PAXGUSDT' ? 'GOLD' : 'CRYPTO',

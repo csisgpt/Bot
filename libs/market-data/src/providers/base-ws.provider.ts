@@ -61,7 +61,13 @@ export abstract class BaseWsProvider extends EventEmitter {
     });
     this.ws.on('message', (data) => {
       this.lastMessageTs = Date.now();
-      this.onMessage(data);
+      try {
+        this.onMessage(data);
+      } catch (e) {
+        this.failures += 1;
+        this.lastError = e instanceof Error ? e.message : String(e);
+        this.logger.warn(JSON.stringify({ event: 'provider_on_message_failed', provider: this.provider, message: this.lastError }));
+      }
     });
     this.ws.on('close', () => {
       this.connected = false;
@@ -154,12 +160,37 @@ export abstract class BaseWsProvider extends EventEmitter {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
-    if (this.ws) {
-      this.ws.removeAllListeners();
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-        this.ws.close();
+
+    const ws = this.ws;
+    this.ws = undefined;
+    this.connected = false;
+
+    if (!ws) return;
+
+    // ✅ IMPORTANT: ensure there is ALWAYS an error handler before we close/terminate
+    ws.on('error', () => { });
+
+    // ✅ Detach our listeners (but DO NOT remove 'error' handler)
+    ws.removeAllListeners('open');
+    ws.removeAllListeners('message');
+    ws.removeAllListeners('close');
+    // (error handlers remain; we just added a noop above)
+
+    try {
+      // If it's OPEN, close gracefully
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close(1000, 'cleanup');
+        return;
       }
-      this.ws = undefined;
+
+      // If CONNECTING or CLOSING, terminate (can emit error, but we have handler)
+      if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.CLOSING) {
+        ws.terminate();
+        return;
+      }
+    } catch {
+      // swallow – we must never crash here
     }
   }
+
 }

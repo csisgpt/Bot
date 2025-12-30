@@ -7,8 +7,10 @@ export interface RetryOptions {
 
 export const retry = async <T>(
   fn: () => Promise<T>,
-  { attempts, baseDelayMs, maxDelayMs = 30_000, shouldRetry }: RetryOptions,
+  options: RetryOptions = { attempts: 3, baseDelayMs: 500 },
 ): Promise<T> => {
+  const { attempts, baseDelayMs, maxDelayMs = 30_000, shouldRetry } = options;
+
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -26,3 +28,4 @@ export const retry = async <T>(
   }
   throw lastError;
 };
+

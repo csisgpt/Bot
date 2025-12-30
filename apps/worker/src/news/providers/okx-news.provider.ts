@@ -20,15 +20,15 @@ export class OkxNewsProvider implements NewsProvider {
   constructor(private readonly configService: ConfigService) {
     this.baseUrl = configService.get<string>(
       'NEWS_OKX_URL',
-      'https://www.okx.com/support/hc/en-us/categories/360000030652',
+      'https://www.okx.com/help/section/announcements-latest-announcements',
     );
     this.rssUrls = [
-      'https://www.okx.com/support/hc/en-us/sections/360000033031?format=atom',
-      'https://www.okx.com/support/hc/en-us/categories/360000030652?format=atom',
+      'https://www.okx.com/help/section/announcements-latest-announcements?format=atom',
+      'https://www.okx.com/help/section/announcements-latest-announcements?format=atom',
     ];
     this.fallbackUrls = [
-      'https://www.okx.com/support/hc/en-us/categories/360000030652',
-      'https://www.okx.com/support/hc/en-us/sections/360000033031',
+      'https://www.okx.com/help/section/announcements-latest-announcements',
+      'https://www.okx.com/help/section/announcements-latest-announcements',
     ].filter((url, index, list) => list.indexOf(url) === index);
     this.timeoutMs = configService.get<number>('NEWS_HTTP_TIMEOUT_MS', 10000);
     this.http = createNewsHttp(this.baseUrl, this.timeoutMs);
