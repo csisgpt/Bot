@@ -164,6 +164,18 @@ NEWS_OKX_URL=https://www.okx.com/support/hc/en-us/categories/360000030652
 
 News items are normalized and stored in Postgres (`News`) with deduplication by `hash`.
 
+### Feeds (Telegram publishing)
+
+Worker feeds are configured in code (not env) in:
+
+- `apps/worker/src/feeds/feeds.config.ts`
+
+Define `destinations` with Telegram chat IDs and set schedules (cron). Prices and news feeds run via `FeedRunnerService` and publish HTML messages through the Telegram bot. Ensure these env keys are set for local runs:
+
+- `TELEGRAM_BOT_TOKEN`
+- `PROVIDERS_ENABLED` (defaults to `binance,bybit,okx`)
+- `NEWS_*` URLs + timeout/retry settings (optional, defaults are set in code)
+
 ### Running workers locally
 
 Start the worker with the multi-provider ingest + arbitrage + news enabled:

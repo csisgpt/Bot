@@ -1,28 +1,57 @@
 import { z } from "zod";
 
+const sanitizeEnvValue = (value: string): string =>
+  value
+    .trim()
+    .replace(/^[('"`]+/, '')
+    .replace(/[)"'`]+$/, '')
+    .trim();
+
+export const booleanFromEnv = (value: unknown): boolean | undefined | unknown => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1 ? true : value === 0 ? false : value;
+
+  const raw = sanitizeEnvValue(String(value)).toLowerCase();
+  if (!raw) return undefined;
+  if (['true', '1', 'yes', 'y', 'on'].includes(raw)) return true;
+  if (['false', '0', 'no', 'n', 'off'].includes(raw)) return false;
+  return value;
+};
+
+export const numberFromEnv = (value: unknown): number | undefined | unknown => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+
+  const raw = sanitizeEnvValue(String(value));
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : value;
+};
+
 /** helpers (همون‌هایی که قبلاً نوشتی) */
 const toInt = (def?: number) =>
   z.preprocess((v) => {
     if (v === undefined || v === null || v === "") return def;
-    const n = typeof v === "number" ? v : Number(String(v).trim());
-    return Number.isFinite(n) ? n : v;
+    const n = numberFromEnv(v);
+    if (n === undefined) return def;
+    return Number.isFinite(n as number) ? n : v;
   }, z.number().int());
 
 const toFloat = (def?: number) =>
   z.preprocess((v) => {
     if (v === undefined || v === null || v === "") return def;
-    const n = typeof v === "number" ? v : Number(String(v).trim());
-    return Number.isFinite(n) ? n : v;
+    const n = numberFromEnv(v);
+    if (n === undefined) return def;
+    return Number.isFinite(n as number) ? n : v;
   }, z.number());
 
 const toBool = (def?: boolean) =>
   z.preprocess((v) => {
     if (v === undefined || v === null || v === "") return def;
-    if (typeof v === "boolean") return v;
-    const s = String(v).trim().toLowerCase();
-    if (["true", "1", "yes", "y", "on"].includes(s)) return true;
-    if (["false", "0", "no", "n", "off"].includes(s)) return false;
-    return v;
+    const parsed = booleanFromEnv(v);
+    if (parsed === undefined) return def;
+    return parsed;
   }, z.boolean());
 
 const csv = (def: string[] = []) =>

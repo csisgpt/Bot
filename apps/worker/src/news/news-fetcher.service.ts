@@ -43,9 +43,9 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.timer = setInterval(() => {
-      void this.fetchOnce();
+      void this.fetchAndStoreOnce();
     }, this.intervalMs);
-    void this.fetchOnce();
+    void this.fetchAndStoreOnce();
   }
 
   onModuleDestroy(): void {
@@ -54,7 +54,7 @@ export class NewsFetcherService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async fetchOnce(): Promise<void> {
+  async fetchAndStoreOnce(): Promise<void> {
     const enabledProviders = this.configService
       .get<string>('PROVIDERS_ENABLED', 'binance')
       .split(',')

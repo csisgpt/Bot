@@ -16,6 +16,7 @@ const buildOrchestratorWithRedis = (redisService: any) => {
     redisService,
     { findExisting: async () => null, createDelivery: async () => null } as never,
     { formatNews: () => '', formatArbitrage: () => '', formatSignal: () => '' } as never,
+    { publishSignal: async () => undefined } as never,
     { add: async () => undefined } as never,
   );
 };

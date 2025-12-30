@@ -17,6 +17,7 @@ import {
   EnabledFeatures,
 } from './policy/policy-engine';
 import { getModePreset, normalizeMode } from './policy/mode-presets';
+import { SignalsFeedPublisherService } from './signals-feed-publisher.service';
 
 const RATE_LIMIT_TTL_SECONDS = 2 * 60 * 60;
 const STATS_BUCKET_TTL_SECONDS = 60 * 60;
@@ -34,12 +35,21 @@ export class NotificationOrchestratorService {
     private readonly redisService: RedisService,
     private readonly deliveryRepository: NotificationDeliveryRepository,
     private readonly formatter: MessageFormatterService,
+    private readonly signalsFeedPublisher: SignalsFeedPublisherService,
     @InjectQueue(SIGNALS_QUEUE_NAME)
     private readonly signalsQueue: Queue,
   ) {}
 
   async handleSignalCreated(signalId: string): Promise<void> {
     await this.handleEntity('SIGNAL', signalId);
+    try {
+      await this.signalsFeedPublisher.publishSignal(signalId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(
+        JSON.stringify({ event: 'signal_feed_publish_failed', signalId, message }),
+      );
+    }
   }
 
   async handleNewsCreated(newsId: string): Promise<void> {

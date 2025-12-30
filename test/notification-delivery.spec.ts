@@ -85,6 +85,7 @@ describe('notification delivery lifecycle', () => {
       exists: vi.fn().mockResolvedValue(0),
       eval: vi.fn().mockResolvedValue(1),
       set: vi.fn().mockResolvedValue('OK'),
+      incr: vi.fn().mockResolvedValue(1),
       rpush: vi.fn(),
       ltrim: vi.fn(),
       expire: vi.fn(),
@@ -97,6 +98,7 @@ describe('notification delivery lifecycle', () => {
       redisService,
       deliveryRepository,
       { formatNews: vi.fn(), formatArbitrage: vi.fn(), formatSignal: vi.fn() } as never,
+      { publishSignal: vi.fn() } as never,
       queue,
     );
 
@@ -150,6 +152,7 @@ describe('notification delivery lifecycle', () => {
       exists: vi.fn().mockResolvedValue(0),
       eval: vi.fn().mockResolvedValue(1),
       set: vi.fn().mockResolvedValue('OK'),
+      incr: vi.fn().mockResolvedValue(1),
       rpush: vi.fn(),
       ltrim: vi.fn(),
       expire: vi.fn(),
@@ -162,6 +165,7 @@ describe('notification delivery lifecycle', () => {
       redisService,
       deliveryRepository,
       { formatNews: vi.fn(), formatArbitrage: vi.fn(), formatSignal: vi.fn() } as never,
+      { publishSignal: vi.fn() } as never,
       queue,
     );
 
@@ -201,6 +205,7 @@ describe('notification delivery lifecycle', () => {
       exists: vi.fn().mockResolvedValue(0),
       eval: vi.fn(),
       set: vi.fn(),
+      incr: vi.fn().mockResolvedValue(1),
       rpush: vi.fn(),
       ltrim: vi.fn(),
       expire: vi.fn(),
@@ -213,6 +218,7 @@ describe('notification delivery lifecycle', () => {
       redisService,
       deliveryRepository,
       { formatNews: vi.fn(), formatArbitrage: vi.fn(), formatSignal: vi.fn() } as never,
+      { publishSignal: vi.fn() } as never,
       queue,
     );
 

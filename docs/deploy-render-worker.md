@@ -15,6 +15,7 @@ corepack enable && pnpm install --no-frozen-lockfile && pnpm build:worker
 ```
 pnpm start:worker:prod
 ```
+(`start:worker:prod` runs `node dist/apps/worker/apps/worker/src/main.js`.)
 
 **Health check path:**
 ```
