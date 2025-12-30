@@ -26,7 +26,9 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
   private readonly providerListeners = new Map<string, () => void>();
   private readonly restPollIntervalMs: number;
   private readonly restPollMaxBackoffMs: number;
-  private readonly restPollConcurrency = 2;
+  private readonly restPollConcurrency: number;
+  private readonly restTickerBatchSize: number;
+  private readonly restTickerBatchConcurrency: number;
   private readonly restPollTimers = new Map<string, NodeJS.Timeout>();
   private readonly restPollLogged = new Set<string>();
   private readonly restPollFailures = new Map<string, number>();
@@ -54,6 +56,18 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
     this.restPollIntervalMs =
       this.configService.get<number>('MARKET_DATA_REST_POLL_INTERVAL_SECONDS', 30) * 1000;
     this.restPollMaxBackoffMs = Math.max(this.restPollIntervalMs * 4, 120_000);
+    this.restPollConcurrency = this.configService.get<number>(
+      'MARKET_DATA_REST_POLL_CONCURRENCY',
+      2,
+    );
+    this.restTickerBatchSize = this.configService.get<number>(
+      'MARKET_DATA_REST_TICKER_BATCH_SIZE',
+      10,
+    );
+    this.restTickerBatchConcurrency = this.configService.get<number>(
+      'MARKET_DATA_REST_TICKER_BATCH_CONCURRENCY',
+      2,
+    );
   }
 
   async onModuleInit(): Promise<void> {
@@ -267,7 +281,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       }
 
       try {
-        const tickers = await provider.fetchTickers(mappings);
+        const tickers = await this.fetchTickersInBatches(provider, mappings);
         for (const ticker of tickers) {
           await this.handleTicker(ticker);
         }
@@ -342,6 +356,30 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       }
     });
     await Promise.all(workers);
+  }
+
+  private async fetchTickersInBatches(
+    provider: MarketDataProvider,
+    mappings: InstrumentMapping[],
+  ): Promise<Ticker[]> {
+    if (!mappings.length) {
+      return [];
+    }
+    const batchSize = Math.max(1, this.restTickerBatchSize);
+    const batches: InstrumentMapping[][] = [];
+    for (let i = 0; i < mappings.length; i += batchSize) {
+      batches.push(mappings.slice(i, i + batchSize));
+    }
+
+    const results: Ticker[] = [];
+    const tasks = batches.map(
+      (batch) => async () => {
+        const tickers = await provider.fetchTickers(batch);
+        results.push(...tickers);
+      },
+    );
+    await this.runWithConcurrency(tasks, Math.max(1, this.restTickerBatchConcurrency));
+    return results;
   }
 
   private inferAssetType(symbol: string): string {

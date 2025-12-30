@@ -100,7 +100,8 @@ Binance WebSocket is used for real-time pricing and Redis caches the latest valu
 Enable the multi-provider WS ingest (Binance/Bybit/OKX) via env:
 
 ```bash
-PROVIDERS_ENABLED=binance,bybit,okx
+MARKET_DATA_ENABLED_PROVIDERS=binance,bybit,okx
+MARKET_DATA_WS_ENABLED_PROVIDERS=binance,bybit,okx
 MARKET_DATA_INGEST_ENABLED=true
 MARKET_DATA_TIMEFRAMES=1m
 ```
@@ -143,6 +144,7 @@ Enable the arbitrage engine:
 
 ```bash
 ARB_ENABLED=true
+ARB_ENABLED_PROVIDERS=binance,bybit,okx,coinbase,kraken
 ARB_SCAN_INTERVAL_SECONDS=5
 ARB_MIN_SPREAD_PCT=0.2
 ARB_MIN_NET_PCT=0.05
@@ -156,6 +158,7 @@ Enable the news worker:
 
 ```bash
 NEWS_ENABLED=true
+NEWS_ENABLED_PROVIDERS=binance,bybit,okx
 NEWS_FETCH_INTERVAL_MINUTES=5
 NEWS_BINANCE_URL=https://www.binance.com/en/support/announcement
 NEWS_BYBIT_URL=https://www.bybit.com/en/announcement-info
@@ -170,10 +173,13 @@ Worker feeds are configured in code (not env) in:
 
 - `apps/worker/src/feeds/feeds.config.ts`
 
-Define `destinations` with Telegram chat IDs and set schedules (cron). Prices and news feeds run via `FeedRunnerService` and publish HTML messages through the Telegram bot. Ensure these env keys are set for local runs:
+Define schedules (cron) and default symbols in code. Feed destinations can be configured via env (or inline in `feeds.config.ts`). Prices and news feeds run via `FeedRunnerService` and publish HTML messages through the Telegram bot. Ensure these env keys are set for local runs:
 
 - `TELEGRAM_BOT_TOKEN`
-- `PROVIDERS_ENABLED` (defaults to `binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp`)
+- `FEED_PRICES_DESTINATIONS`, `FEED_NEWS_DESTINATIONS`, `FEED_SIGNALS_DESTINATIONS` (comma-separated chat IDs)
+- `MARKET_DATA_ENABLED_PROVIDERS` / `MARKET_DATA_WS_ENABLED_PROVIDERS`
+- `NEWS_ENABLED_PROVIDERS`
+- `ARB_ENABLED_PROVIDERS`
 - `NEWS_*` URLs + timeout/retry settings (optional, defaults are set in code)
 
 ### Running workers locally

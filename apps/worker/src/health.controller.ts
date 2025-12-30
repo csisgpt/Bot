@@ -109,11 +109,9 @@ export class HealthController {
     sampleFreshness: Record<string, number | null>;
     providerErrors: Record<string, string | null>;
   }> {
-    const enabledProviders = this.configService
-      .get<string>('PROVIDERS_ENABLED', 'binance')
-      .split(',')
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean);
+    const enabledProviders = this.providerRegistryService
+      .getEnabledProviders()
+      .map((provider) => provider.provider);
     const snapshots = this.providerRegistryService.getSnapshots();
     const connectedProviders = snapshots.filter((snapshot) => snapshot.connected).length;
     const activeSymbols = this.activeSymbolsService.getActiveSymbols();

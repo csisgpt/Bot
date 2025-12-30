@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { PrismaService, RedisService } from '@libs/core';
@@ -21,6 +22,7 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FeedRunnerService.name);
 
   constructor(
+    private readonly configService: ConfigService,
     private readonly schedulerRegistry: SchedulerRegistry,
     private readonly providerRegistry: ProviderRegistryService,
     private readonly prismaService: PrismaService,
@@ -82,7 +84,8 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runPricesFeed(feed: PricesFeedConfig, runId: string): Promise<void> {
-    if (feed.destinations.length === 0) {
+    const destinations = this.resolveDestinations(feed);
+    if (destinations.length === 0) {
       this.logger.warn(
         JSON.stringify({ event: 'feed_no_destinations', feedId: feed.id, runId }),
       );
@@ -111,7 +114,7 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
         const mappings = this.buildMappings(provider.provider, missingSymbols);
         if (mappings.length > 0) {
           try {
-            const tickers = await provider.fetchTickers(mappings);
+            const tickers = await this.fetchTickersInBatches(provider, mappings);
             for (const ticker of tickers) {
               await this.marketDataCache.setTicker(ticker.provider, ticker.canonicalSymbol, {
                 provider: ticker.provider,
@@ -178,7 +181,7 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
       includeTimestamp: feed.options.includeTimestamp,
     });
 
-    for (const chatId of feed.destinations) {
+    for (const chatId of destinations) {
       await this.telegramPublisher.sendMessage(chatId, message, { parseMode: 'HTML' });
     }
 
@@ -188,7 +191,7 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
         feedId: feed.id,
         runId,
         symbols: symbols.length,
-        destinations: feed.destinations.length,
+        destinations: destinations.length,
       }),
     );
   }
@@ -217,7 +220,8 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runNewsFeed(feed: NewsFeedConfig, runId: string): Promise<void> {
-    if (feed.destinations.length === 0) {
+    const destinations = this.resolveDestinations(feed);
+    if (destinations.length === 0) {
       this.logger.warn(
         JSON.stringify({ event: 'feed_no_destinations', feedId: feed.id, runId }),
       );
@@ -264,7 +268,7 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
       includeTags: feed.options.includeTags,
     });
 
-    for (const chatId of feed.destinations) {
+    for (const chatId of destinations) {
       await this.telegramPublisher.sendMessage(chatId, message, { parseMode: 'HTML' });
     }
 
@@ -279,8 +283,60 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
         feedId: feed.id,
         runId,
         items: newsItems.length,
-        destinations: feed.destinations.length,
+        destinations: destinations.length,
       }),
     );
+  }
+
+  private resolveDestinations(feed: FeedConfig): string[] {
+    if (feed.destinations.length > 0) {
+      return feed.destinations;
+    }
+    const key =
+      feed.type === 'prices'
+        ? 'FEED_PRICES_DESTINATIONS'
+        : feed.type === 'news'
+        ? 'FEED_NEWS_DESTINATIONS'
+        : 'FEED_SIGNALS_DESTINATIONS';
+    const raw = this.configService.get<string>(key, '');
+    return raw
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  private async fetchTickersInBatches(
+    provider: { fetchTickers: (mappings: InstrumentMapping[]) => Promise<any[]> },
+    mappings: InstrumentMapping[],
+  ): Promise<any[]> {
+    if (!mappings.length) {
+      return [];
+    }
+    const batchSize = Math.max(
+      1,
+      this.configService.get<number>('MARKET_DATA_REST_TICKER_BATCH_SIZE', 10),
+    );
+    const concurrency = Math.max(
+      1,
+      this.configService.get<number>('MARKET_DATA_REST_TICKER_BATCH_CONCURRENCY', 2),
+    );
+    const batches: InstrumentMapping[][] = [];
+    for (let i = 0; i < mappings.length; i += batchSize) {
+      batches.push(mappings.slice(i, i + batchSize));
+    }
+    const results: any[] = [];
+    const queue = [...batches];
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (queue.length) {
+        const batch = queue.shift();
+        if (!batch) {
+          return;
+        }
+        const tickers = await provider.fetchTickers(batch);
+        results.push(...tickers);
+      }
+    });
+    await Promise.all(workers);
+    return results;
   }
 }

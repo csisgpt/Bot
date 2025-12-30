@@ -128,15 +128,24 @@ export class KrakenMarketDataProvider extends BaseWsProvider implements MarketDa
       return;
     }
 
-    if (raw.startsWith('{')) {
-      const event = JSON.parse(raw) as KrakenWsEvent;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      this.failures += 1;
+      this.lastError = error instanceof Error ? error.message : 'Invalid JSON';
+      return;
+    }
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const event = parsed as KrakenWsEvent;
       if (event.event === 'subscriptionStatus' && event.status === 'error') {
         this.lastError = event.errorMessage ?? 'Subscription error';
       }
       return;
     }
 
-    const message = JSON.parse(raw) as any[];
+    const message = parsed as any[];
     if (!Array.isArray(message) || message.length < 3) {
       return;
     }

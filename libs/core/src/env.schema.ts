@@ -141,10 +141,6 @@ const envObject = z
     BINANCE_SYMBOLS: z.string().trim().optional(),
     DEFAULT_TIMEFRAMES: csv(["5m", "15m"]).default(["5m", "15m"]),
     MONITORING_ENABLED: toBool(true).default(true),
-    PROVIDERS_ENABLED: z
-      .string()
-      .trim()
-      .default("binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp"),
     MARKET_DATA_INGEST_ENABLED: toBool(true).default(true),
     MARKET_DATA_ENABLED_PROVIDERS: z
       .string()
@@ -156,6 +152,9 @@ const envObject = z
       .default("binance,bybit,okx,coinbase,kraken"),
     MARKET_DATA_REST_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
     MARKET_DATA_REST_POLL_INTERVAL_SECONDS: toInt(30).pipe(z.number().int().min(5).max(3600)),
+    MARKET_DATA_REST_POLL_CONCURRENCY: toInt(2).pipe(z.number().int().min(1).max(20)),
+    MARKET_DATA_REST_TICKER_BATCH_SIZE: toInt(10).pipe(z.number().int().min(1).max(1000)),
+    MARKET_DATA_REST_TICKER_BATCH_CONCURRENCY: toInt(2).pipe(z.number().int().min(1).max(20)),
     MARKET_DATA_WS_RECONNECT_BASE_DELAY_MS: toInt(1000).pipe(z.number().int().min(100).max(60_000)),
     MARKET_DATA_WS_RECONNECT_MAX_DELAY_MS: toInt(30000).pipe(z.number().int().min(1000).max(300_000)),
     MARKET_DATA_TIMEFRAMES: csv(["1m"]).default(["1m"]),
@@ -271,6 +270,10 @@ const envObject = z
     KCEX_WS_URL: z.string().trim().optional(),
 
     ARB_ENABLED: toBool(true).default(true),
+    ARB_ENABLED_PROVIDERS: z
+      .string()
+      .trim()
+      .default("binance,bybit,okx,coinbase,kraken"),
     ARB_SCAN_INTERVAL_SECONDS: toInt(5).pipe(z.number().int().min(1).max(3600)),
     ARB_STALE_MS: toInt(15000).pipe(z.number().int().min(1000).max(300_000)),
     ARB_MIN_SPREAD_PCT: toFloat(0.2).pipe(z.number().min(0).max(100)),
@@ -286,6 +289,7 @@ const envObject = z
     PROVIDER_TAKER_FEE_BPS_KCEX: toFloat(10).pipe(z.number().min(0).max(1000)),
 
     NEWS_ENABLED: toBool(true).default(true),
+    NEWS_ENABLED_PROVIDERS: z.string().trim().default("binance,bybit,okx"),
     NEWS_FETCH_INTERVAL_MINUTES: toInt(5).pipe(z.number().int().min(1).max(1440)),
     NEWS_HTTP_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
     NEWS_RETRY_ATTEMPTS: toInt(3).pipe(z.number().int().min(1).max(10)),
@@ -301,6 +305,10 @@ const envObject = z
 
     BINANCE_WS_ENABLED: toBool(false).default(false),
     BINANCE_WS_BASE_URL: z.string().trim().default("wss://stream.binance.com:9443"),
+
+    FEED_PRICES_DESTINATIONS: csv([]).default([]),
+    FEED_NEWS_DESTINATIONS: csv([]).default([]),
+    FEED_SIGNALS_DESTINATIONS: csv([]).default([]),
 
     RUN_API: toBool(true).default(true),
     RUN_WORKER: toBool(false).default(false),

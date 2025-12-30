@@ -7,6 +7,7 @@ import {
   DepthAwareArbitrageStrategy,
   FundingDivergenceStrategy,
   InstrumentRegistryService,
+  ProviderRegistryService,
   TriangularArbitrageStrategy,
   ArbitrageSnapshot,
   Ticker,
@@ -32,6 +33,7 @@ export class ArbitrageScannerService implements OnModuleInit, OnModuleDestroy {
     private readonly redisService: RedisService,
     private readonly prismaService: PrismaService,
     private readonly instrumentRegistry: InstrumentRegistryService,
+    private readonly providerRegistry: ProviderRegistryService,
     private readonly notificationOrchestrator: NotificationOrchestratorService,
   ) {
     this.enabled = configService.get<boolean>('ARB_ENABLED', true);
@@ -161,18 +163,22 @@ export class ArbitrageScannerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async buildSnapshot(): Promise<ArbitrageSnapshot> {
-    const providers = this.configService
-      .get<string>('PROVIDERS_ENABLED', 'binance')
+    const enabledProviders = this.providerRegistry
+      .getEnabledProviders()
+      .map((provider) => provider.provider);
+    const allowedProviders = this.configService
+      .get<string>('ARB_ENABLED_PROVIDERS', enabledProviders.join(','))
       .split(',')
       .map((item) => item.trim().toLowerCase())
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((provider) => enabledProviders.includes(provider));
     const instruments = this.instrumentRegistry.getInstruments();
 
     const keys: string[] = [];
     const keyMap: Array<{ symbol: string; provider: string; key: string }> = [];
 
     for (const instrument of instruments) {
-      for (const provider of providers) {
+      for (const provider of allowedProviders) {
         const key = `latest:book:${instrument.canonicalSymbol}:${provider}`;
         keys.push(key);
         keyMap.push({ symbol: instrument.canonicalSymbol, provider, key });
