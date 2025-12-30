@@ -21,6 +21,8 @@ export const getProviderEndpoints = (
     bitfinex: { rest: 'https://api-pub.bitfinex.com' },
     bitstamp: { rest: 'https://www.bitstamp.net/api/v2' },
     kcex: { rest: 'https://api.kcex.com' },
+    twelvedata: { rest: 'https://api.twelvedata.com', ws: 'wss://ws.twelvedata.com/v1/quotes/price' },
+    navasan: { rest: 'https://api.navasan.tech' },
   };
 
   const envPrefix = provider.toUpperCase();

@@ -8,5 +8,9 @@ describe('interval mapper', () => {
     expect(toInterval('kraken', '1h')).toBe(60);
     expect(toInterval('kucoin', '15m')).toBe('15min');
     expect(toInterval('bitfinex', '1d')).toBe('1D');
+    expect(toInterval('twelvedata', '1m')).toBe('1min');
+    expect(toInterval('twelvedata', '1d')).toBe('1day');
+    expect(toInterval('navasan', '1d')).toBe('1d');
+    expect(toInterval('navasan', '1m')).toBeNull();
   });
 });

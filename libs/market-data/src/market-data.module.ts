@@ -13,6 +13,8 @@ import { GateioMarketDataProvider } from './providers/gateio.provider';
 import { MexcMarketDataProvider } from './providers/mexc.provider';
 import { BitfinexMarketDataProvider } from './providers/bitfinex.provider';
 import { BitstampMarketDataProvider } from './providers/bitstamp.provider';
+import { TwelveDataMarketDataProvider } from './providers/twelvedata.provider';
+import { NavasanMarketDataProvider } from './providers/navasan.provider';
 
 @Module({
   imports: [ConfigModule],
@@ -30,6 +32,8 @@ import { BitstampMarketDataProvider } from './providers/bitstamp.provider';
     MexcMarketDataProvider,
     BitfinexMarketDataProvider,
     BitstampMarketDataProvider,
+    TwelveDataMarketDataProvider,
+    NavasanMarketDataProvider,
     {
       provide: MARKET_DATA_PROVIDERS,
       useFactory: (
@@ -44,6 +48,8 @@ import { BitstampMarketDataProvider } from './providers/bitstamp.provider';
         mexc: MexcMarketDataProvider,
         bitfinex: BitfinexMarketDataProvider,
         bitstamp: BitstampMarketDataProvider,
+        twelvedata: TwelveDataMarketDataProvider,
+        navasan: NavasanMarketDataProvider,
       ) => [
         binance,
         bybit,
@@ -56,6 +62,8 @@ import { BitstampMarketDataProvider } from './providers/bitstamp.provider';
         mexc,
         bitfinex,
         bitstamp,
+        twelvedata,
+        navasan,
       ],
       inject: [
         BinanceMarketDataProvider,
@@ -69,6 +77,8 @@ import { BitstampMarketDataProvider } from './providers/bitstamp.provider';
         MexcMarketDataProvider,
         BitfinexMarketDataProvider,
         BitstampMarketDataProvider,
+        TwelveDataMarketDataProvider,
+        NavasanMarketDataProvider,
       ],
     },
   ],

@@ -19,9 +19,24 @@ describe('provider symbol mapping', () => {
       providerSymbol: 'tBTCUST',
       providerInstId: 'tBTCUST',
     });
+    expect(providerSymbolFromCanonical('twelvedata', 'EURUSD')).toEqual({
+      providerSymbol: 'EUR/USD',
+      providerInstId: 'EUR/USD',
+    });
+    expect(providerSymbolFromCanonical('twelvedata', 'AAPLUSD')).toEqual({
+      providerSymbol: 'AAPL',
+      providerInstId: 'AAPL',
+    });
   });
 
   it('returns null for unknown quotes', () => {
     expect(providerSymbolFromCanonical('okx', 'FOOBAR')).toBeNull();
+  });
+
+  it('maps navasan overrides', () => {
+    expect(providerSymbolFromCanonical('navasan', 'USDIRT', 'USDIRT:usd_sell')).toEqual({
+      providerSymbol: 'usd_sell',
+      providerInstId: 'usd_sell',
+    });
   });
 });

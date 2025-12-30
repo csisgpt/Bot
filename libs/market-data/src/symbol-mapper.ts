@@ -13,9 +13,27 @@ const QUOTE_ASSETS = [
   'CAD',
   'TRY',
   'AED',
+  'IRT',
+  'IRR',
   'BTC',
   'ETH',
 ];
+
+const FIAT_ASSETS = new Set([
+  'USD',
+  'EUR',
+  'GBP',
+  'JPY',
+  'CHF',
+  'AUD',
+  'CAD',
+  'TRY',
+  'AED',
+  'IRR',
+  'IRT',
+]);
+
+const COMMODITY_BASES = new Set(['XAU', 'XAG', 'XPT', 'XPD']);
 
 const BASE_ALIASES: Record<string, string> = {
   XBT: 'BTC',
@@ -166,7 +184,12 @@ export const providerSymbolFromCanonical = (
   const parts = splitCanonicalSymbol(symbol);
   if (!parts) return null;
 
-  const overrides = parseOverrides(overridesRaw);
+  const providerKey = provider.toUpperCase();
+  const overridesValue =
+    overridesRaw ?? process.env[`MARKET_DATA_SYMBOL_OVERRIDES_${providerKey}`];
+  const preferredQuoteValue =
+    preferredQuoteRaw ?? process.env[`MARKET_DATA_PREFERRED_QUOTE_${providerKey}`];
+  const overrides = parseOverrides(overridesValue);
   const canonical = normalizeCanonicalSymbol(symbol);
   const overridden = overrides[canonical];
 
@@ -174,14 +197,27 @@ export const providerSymbolFromCanonical = (
     return { providerSymbol: overridden, providerInstId: overridden };
   }
 
+  if (provider === 'navasan') {
+    return null;
+  }
+
   const ruled = applyQuoteRules(
     provider,
     parts.base,
     parts.quote,
     /* overridesHit */ false,
-    preferredQuoteRaw,
+    preferredQuoteValue,
   );
   if (!ruled) return null;
+
+  if (provider === 'twelvedata') {
+    const isEquity =
+      FIAT_ASSETS.has(ruled.quote) &&
+      !FIAT_ASSETS.has(ruled.base) &&
+      !COMMODITY_BASES.has(ruled.base);
+    const providerSymbol = isEquity ? ruled.base : `${ruled.base}/${ruled.quote}`;
+    return { providerSymbol, providerInstId: providerSymbol };
+  }
 
   const providerSymbol = toProviderSymbol(provider, ruled.base, ruled.quote);
   const providerInstId = toProviderInstId(provider, ruled.base, ruled.quote);
@@ -195,9 +231,28 @@ export const buildInstrumentFromSymbol = (symbol: string): Instrument | null => 
   const parts = splitCanonicalSymbol(normalized);
   if (!parts) return null;
 
+  const assetType = (() => {
+    if (normalized === 'XAUTUSDT' || normalized === 'PAXGUSDT') {
+      return 'GOLD';
+    }
+    if (parts.quote === 'IRT' || parts.quote === 'IRR') {
+      return 'IRAN';
+    }
+    if (COMMODITY_BASES.has(parts.base)) {
+      return 'COMMODITY';
+    }
+    if (FIAT_ASSETS.has(parts.base) && FIAT_ASSETS.has(parts.quote)) {
+      return 'FOREX';
+    }
+    if (FIAT_ASSETS.has(parts.quote) && !FIAT_ASSETS.has(parts.base)) {
+      return 'EQUITY';
+    }
+    return 'CRYPTO';
+  })();
+
   return {
     id: `${parts.base.toLowerCase()}-${parts.quote.toLowerCase()}`,
-    assetType: normalized === 'XAUTUSDT' || normalized === 'PAXGUSDT' ? 'GOLD' : 'CRYPTO',
+    assetType,
     base: parts.base,
     quote: parts.quote,
     canonicalSymbol: normalized,

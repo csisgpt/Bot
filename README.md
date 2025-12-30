@@ -195,6 +195,9 @@ Market data v3 provider config (REST/WS):
 ```bash
 MARKET_DATA_ENABLED_PROVIDERS=binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp
 MARKET_DATA_WS_ENABLED_PROVIDERS=binance,bybit,okx,coinbase,kraken
+# Enable TwelveData/Navasan by adding them to the list:
+# MARKET_DATA_ENABLED_PROVIDERS=...,twelvedata,navasan
+# MARKET_DATA_WS_ENABLED_PROVIDERS=...,twelvedata
 MARKET_DATA_REST_POLL_INTERVAL_SECONDS=30
 ```
 

@@ -8,6 +8,8 @@ import {
   Candle,
   Ticker,
   InstrumentMapping,
+  normalizeCanonicalSymbol,
+  splitCanonicalSymbol,
 } from '@libs/market-data';
 import { Queue } from 'bullmq';
 import { MARKET_DATA_QUEUE_NAME } from '@libs/core';
@@ -383,9 +385,39 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
   }
 
   private inferAssetType(symbol: string): string {
-    const normalized = symbol.trim().toUpperCase();
+    const normalized = normalizeCanonicalSymbol(symbol);
     if (normalized === 'XAUTUSDT' || normalized === 'PAXGUSDT') {
       return 'GOLD';
+    }
+    const parts = splitCanonicalSymbol(normalized);
+    if (!parts) {
+      return 'CRYPTO';
+    }
+    const fiatAssets = new Set([
+      'USD',
+      'EUR',
+      'GBP',
+      'JPY',
+      'CHF',
+      'AUD',
+      'CAD',
+      'TRY',
+      'AED',
+      'IRR',
+      'IRT',
+    ]);
+    const commodityBases = new Set(['XAU', 'XAG', 'XPT', 'XPD']);
+    if (parts.quote === 'IRT' || parts.quote === 'IRR') {
+      return 'IRAN';
+    }
+    if (commodityBases.has(parts.base)) {
+      return 'COMMODITY';
+    }
+    if (fiatAssets.has(parts.base) && fiatAssets.has(parts.quote)) {
+      return 'FOREX';
+    }
+    if (fiatAssets.has(parts.quote) && !fiatAssets.has(parts.base)) {
+      return 'EQUITY';
     }
     return 'CRYPTO';
   }

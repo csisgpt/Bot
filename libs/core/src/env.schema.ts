@@ -160,6 +160,22 @@ const envObject = z
     MARKET_DATA_TIMEFRAMES: csv(["1m"]).default(["1m"]),
     MARKET_DATA_TICKER_TTL_SECONDS: toInt(120).pipe(z.number().int().min(5).max(3600)),
     LEGACY_CANDLE_COMPAT_ENABLED: toBool(true).default(true),
+    MARKET_DATA_SYMBOL_OVERRIDES_TWELVEDATA: z.string().trim().optional(),
+    MARKET_DATA_SYMBOL_OVERRIDES_NAVASAN: z.string().trim().optional(),
+
+    TWELVEDATA_API_KEY: z.string().trim().optional().default(""),
+    TWELVEDATA_REST_URL: z.string().trim().default("https://api.twelvedata.com"),
+    TWELVEDATA_WS_URL: z.string().trim().default("wss://ws.twelvedata.com/v1/quotes/price"),
+    TWELVEDATA_MAX_SYMBOLS_PER_REQUEST: toInt(20).pipe(z.number().int().min(1).max(200)),
+    TWELVEDATA_TIMEOUT_MS: toInt(15000).pipe(z.number().int().min(1000).max(120_000)),
+    TWELVEDATA_RETRY_ATTEMPTS: toInt(3).pipe(z.number().int().min(1).max(10)),
+    TWELVEDATA_RETRY_BASE_DELAY_MS: toInt(500).pipe(z.number().int().min(100).max(10_000)),
+
+    NAVASAN_API_KEY: z.string().trim().optional().default(""),
+    NAVASAN_REST_URL: z.string().trim().default("https://api.navasan.tech"),
+    NAVASAN_TIMEOUT_MS: toInt(15000).pipe(z.number().int().min(1000).max(120_000)),
+    NAVASAN_RETRY_ATTEMPTS: toInt(3).pipe(z.number().int().min(1).max(10)),
+    NAVASAN_RETRY_BASE_DELAY_MS: toInt(500).pipe(z.number().int().min(100).max(10_000)),
 
     PRICE_PROVIDER_GOLD: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
     PRICE_PROVIDER_CRYPTO: z.enum(["BINANCE_SPOT", "BINANCE_FUTURES", "MANUAL"]).default("BINANCE_SPOT"),
