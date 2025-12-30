@@ -7,11 +7,15 @@ const defaultHeaders = {
   'Accept-Language': 'en-US,en;q=0.8',
 };
 
-export const createNewsHttp = (baseURL: string, timeoutMs: number): AxiosInstance =>
+export const createNewsHttp = (
+  baseURL: string,
+  timeoutMs: number,
+  extraHeaders: Record<string, string> = {},
+): AxiosInstance =>
   axios.create({
     baseURL,
     timeout: timeoutMs,
-    headers: defaultHeaders,
+    headers: { ...defaultHeaders, ...extraHeaders },
     maxRedirects: 3,
     validateStatus: (status) => status >= 200 && status < 500,
   });

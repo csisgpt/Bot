@@ -34,6 +34,11 @@ export class ProviderRegistryService {
     );
   }
 
+  getProviderByName(name: string): MarketDataProvider | undefined {
+    const normalized = name.trim().toLowerCase();
+    return this.providers.find((provider) => provider.provider === normalized);
+  }
+
   async startAll(): Promise<void> {
     const enabledProviders = this.getEnabledProviders();
     for (const provider of enabledProviders) {

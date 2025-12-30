@@ -14,8 +14,8 @@ export const booleanFromEnv = (value: unknown): boolean | undefined | unknown =>
 
   const raw = sanitizeEnvValue(String(value)).toLowerCase();
   if (!raw) return undefined;
-  if (['true', '1', 'yes', 'y', 'on'].includes(raw)) return true;
-  if (['false', '0', 'no', 'n', 'off'].includes(raw)) return false;
+  if (raw === 'true' || raw === '1') return true;
+  if (raw === 'false' || raw === '0') return false;
   return value;
 };
 
@@ -52,7 +52,7 @@ const toBool = (def?: boolean) =>
     const parsed = booleanFromEnv(v);
     if (parsed === undefined) return def;
     return parsed;
-  }, z.boolean());
+  }, z.boolean({ invalid_type_error: 'Invalid boolean value (use true/false/1/0)' }));
 
 const csv = (def: string[] = []) =>
   z.preprocess((v) => {

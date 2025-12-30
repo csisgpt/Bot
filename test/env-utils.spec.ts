@@ -9,6 +9,8 @@ describe('env parsing helpers', () => {
     expect(booleanFromEnv('false)')).toBe(false);
     expect(booleanFromEnv('(1)')).toBe(true);
     expect(booleanFromEnv('0')).toBe(false);
+    expect(booleanFromEnv('yes')).toBe('yes');
+    expect(booleanFromEnv('no')).toBe('no');
   });
 
   it('parses numbers with trimming', () => {

@@ -14,6 +14,7 @@ import { MARKET_DATA_QUEUE_NAME } from '@libs/core';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ActiveSymbolsService } from './active-symbols.service';
 import { Prisma } from '@prisma/client';
+import { MarketDataCacheService } from './market-data-cache.service';
 
 @Injectable()
 export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
@@ -24,13 +25,19 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
   private readonly legacyCandleCompatEnabled: boolean;
   private readonly providerListeners = new Map<string, () => void>();
   private readonly restPollIntervalMs: number;
+  private readonly restPollMaxBackoffMs: number;
+  private readonly restPollConcurrency = 2;
   private readonly restPollTimers = new Map<string, NodeJS.Timeout>();
   private readonly restPollLogged = new Set<string>();
+  private readonly restPollFailures = new Map<string, number>();
+  private readonly restPollInFlight = new Set<string>();
+  private restPollStopped = false;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly prismaService: PrismaService,
     private readonly redisService: RedisService,
+    private readonly marketDataCache: MarketDataCacheService,
     private readonly instrumentRegistry: InstrumentRegistryService,
     private readonly providerRegistry: ProviderRegistryService,
     private readonly activeSymbolsService: ActiveSymbolsService,
@@ -46,6 +53,7 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
     );
     this.restPollIntervalMs =
       this.configService.get<number>('MARKET_DATA_REST_POLL_INTERVAL_SECONDS', 30) * 1000;
+    this.restPollMaxBackoffMs = Math.max(this.restPollIntervalMs * 4, 120_000);
   }
 
   async onModuleInit(): Promise<void> {
@@ -96,11 +104,12 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.restPollStopped = true;
     for (const cleanup of this.providerListeners.values()) {
       cleanup();
     }
     for (const timer of this.restPollTimers.values()) {
-      clearInterval(timer);
+      clearTimeout(timer);
     }
     await this.providerRegistry.stopAll();
   }
@@ -120,6 +129,14 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
 
     await this.redisService.set(tickerKey, payload, 'EX', this.ttlSeconds);
     await this.redisService.set(bookKey, payload, 'EX', this.ttlSeconds);
+    await this.marketDataCache.setTicker(ticker.provider, ticker.canonicalSymbol, {
+      provider: ticker.provider,
+      symbol: ticker.canonicalSymbol,
+      bid: ticker.bid ?? null,
+      ask: ticker.ask ?? null,
+      last: ticker.last ?? null,
+      ts: ticker.ts,
+    });
   }
 
   private async handleCandle(candle: Candle): Promise<void> {
@@ -211,9 +228,34 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    const scheduleNext = (delayMs: number) => {
+      if (this.restPollStopped) {
+        return;
+      }
+      const existing = this.restPollTimers.get(provider.provider);
+      if (existing) {
+        clearTimeout(existing);
+      }
+      const timer = setTimeout(() => {
+        void poll();
+      }, delayMs);
+      this.restPollTimers.set(provider.provider, timer);
+    };
+
     const poll = async () => {
+      if (this.restPollStopped) {
+        return;
+      }
+      this.restPollTimers.delete(provider.provider);
+      if (this.restPollInFlight.has(provider.provider)) {
+        return;
+      }
+      this.restPollInFlight.add(provider.provider);
+      let hadError = false;
       const snapshot = provider.getSnapshot();
       if (provider.supportsWebsocket && wsEnabled && snapshot.connected) {
+        this.restPollInFlight.delete(provider.provider);
+        scheduleNext(this.restPollIntervalMs);
         return;
       }
 
@@ -230,40 +272,76 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
           await this.handleTicker(ticker);
         }
       } catch (error) {
+        hadError = true;
         const message = error instanceof Error ? error.message : 'Unknown error';
         this.logger.warn(
           JSON.stringify({ event: 'rest_poll_error', provider: provider.provider, message }),
         );
       }
 
+      const tasks: Array<() => Promise<void>> = [];
       for (const mapping of mappings) {
         for (const timeframe of timeframes) {
-          try {
-            const candles = await provider.fetchCandles(mapping, timeframe, 2);
-            for (const candle of candles) {
-              await this.handleCandle(candle);
+          tasks.push(async () => {
+            try {
+              const candles = await provider.fetchCandles(mapping, timeframe, 2);
+              for (const candle of candles) {
+                await this.handleCandle(candle);
+              }
+            } catch (error) {
+              hadError = true;
+              const message = error instanceof Error ? error.message : 'Unknown error';
+              this.logger.warn(
+                JSON.stringify({
+                  event: 'rest_poll_error',
+                  provider: provider.provider,
+                  symbol: mapping.canonicalSymbol,
+                  timeframe,
+                  message,
+                }),
+              );
             }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            this.logger.warn(
-              JSON.stringify({
-                event: 'rest_poll_error',
-                provider: provider.provider,
-                symbol: mapping.canonicalSymbol,
-                timeframe,
-                message,
-              }),
-            );
-          }
+          });
         }
       }
+
+      await this.runWithConcurrency(tasks, this.restPollConcurrency);
+
+      if (hadError) {
+        const failures = (this.restPollFailures.get(provider.provider) ?? 0) + 1;
+        this.restPollFailures.set(provider.provider, failures);
+        const delayMs = Math.min(
+          this.restPollIntervalMs * 2 ** failures,
+          this.restPollMaxBackoffMs,
+        );
+        this.restPollInFlight.delete(provider.provider);
+        scheduleNext(delayMs);
+        return;
+      }
+
+      this.restPollFailures.set(provider.provider, 0);
+      this.restPollInFlight.delete(provider.provider);
+      scheduleNext(this.restPollIntervalMs);
     };
 
-    const timer = setInterval(() => {
-      void poll();
-    }, this.restPollIntervalMs);
-    this.restPollTimers.set(provider.provider, timer);
     void poll();
+  }
+
+  private async runWithConcurrency(
+    tasks: Array<() => Promise<void>>,
+    limit: number,
+  ): Promise<void> {
+    const queue = [...tasks];
+    const workers = Array.from({ length: Math.max(1, limit) }, async () => {
+      while (queue.length) {
+        const task = queue.shift();
+        if (!task) {
+          return;
+        }
+        await task();
+      }
+    });
+    await Promise.all(workers);
   }
 
   private inferAssetType(symbol: string): string {
