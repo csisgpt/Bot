@@ -57,18 +57,17 @@ export class TradingViewIngestProcessor extends WorkerHost {
 
       const signal = mapTradingViewPayloadToSignal(payloadRaw, defaults, undefined);
 
-      // ✅ 3) بعدش اگر price خالی بود، تلاش کن fallback بگیری (اما ارسال تلگرام انجام شده)
       if (signal.price === null) {
         const priceFallbackTimeoutMs = this.getNumber('TRADINGVIEW_PRICE_FALLBACK_TIMEOUT_MS', 800);
-
-        void this.withTimeout(this.resolvePriceFallback(payload, defaults), priceFallbackTimeoutMs, undefined)
-          .then((priceFallback) => {
-            // اگر خواستی: اینجا می‌تونی یک "update" سیگنال ذخیره کنی یا log بزنی
-            if (priceFallback !== undefined) {
-              this.logger.log(`Resolved fallback price: ${priceFallback} for ${signal.instrument}`);
-            }
-          })
-          .catch((e) => this.logger.warn(`Fallback price resolve failed: ${e?.message ?? e}`));
+        const priceFallback = await this.withTimeout(
+          this.resolvePriceFallback(payload, defaults),
+          priceFallbackTimeoutMs,
+          undefined,
+        );
+        if (priceFallback !== undefined) {
+          signal.price = priceFallback;
+          this.logger.log(`Resolved fallback price: ${priceFallback} for ${signal.instrument}`);
+        }
       }
 
       const storedSignal = await this.signalsService.storeSignal(signal);

@@ -146,6 +146,18 @@ const envObject = z
       .trim()
       .default("binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp"),
     MARKET_DATA_INGEST_ENABLED: toBool(true).default(true),
+    MARKET_DATA_ENABLED_PROVIDERS: z
+      .string()
+      .trim()
+      .default("binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp"),
+    MARKET_DATA_WS_ENABLED_PROVIDERS: z
+      .string()
+      .trim()
+      .default("binance,bybit,okx,coinbase,kraken"),
+    MARKET_DATA_REST_TIMEOUT_MS: toInt(10000).pipe(z.number().int().min(1000).max(120_000)),
+    MARKET_DATA_REST_POLL_INTERVAL_SECONDS: toInt(30).pipe(z.number().int().min(5).max(3600)),
+    MARKET_DATA_WS_RECONNECT_BASE_DELAY_MS: toInt(1000).pipe(z.number().int().min(100).max(60_000)),
+    MARKET_DATA_WS_RECONNECT_MAX_DELAY_MS: toInt(30000).pipe(z.number().int().min(1000).max(300_000)),
     MARKET_DATA_TIMEFRAMES: csv(["1m"]).default(["1m"]),
     MARKET_DATA_TICKER_TTL_SECONDS: toInt(120).pipe(z.number().int().min(5).max(3600)),
     LEGACY_CANDLE_COMPAT_ENABLED: toBool(true).default(true),

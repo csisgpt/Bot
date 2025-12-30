@@ -18,6 +18,7 @@ export abstract class BaseWsProvider extends EventEmitter {
   protected reconnects = 0;
   protected failures = 0;
   protected lastError: string | null = null;
+  protected readonly sendQueue: string[] = [];
   private heartbeatTimer?: NodeJS.Timeout;
   private reconnectTimer?: NodeJS.Timeout;
   private reconnectDelayMs: number;
@@ -42,7 +43,7 @@ export abstract class BaseWsProvider extends EventEmitter {
   protected abstract onMessage(data: WebSocket.RawData): void;
   protected abstract onClose(): void;
 
-  async connect(): Promise<void> {
+  async start(): Promise<void> {
     if (this.ws && this.connected) {
       return;
     }
@@ -55,6 +56,7 @@ export abstract class BaseWsProvider extends EventEmitter {
       this.connected = true;
       this.reconnectDelayMs = this.reconnectBaseMs;
       this.onOpen();
+      this.flushQueue();
       this.startHeartbeat();
     });
     this.ws.on('message', (data) => {
@@ -82,7 +84,7 @@ export abstract class BaseWsProvider extends EventEmitter {
     });
   }
 
-  async disconnect(): Promise<void> {
+  async stop(): Promise<void> {
     this.cleanup();
   }
 
@@ -98,10 +100,24 @@ export abstract class BaseWsProvider extends EventEmitter {
   }
 
   protected send(payload: unknown): void {
+    const message = JSON.stringify(payload);
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.sendQueue.push(message);
+      return;
+    }
+    this.ws.send(message);
+  }
+
+  private flushQueue(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
-    this.ws.send(JSON.stringify(payload));
+    while (this.sendQueue.length) {
+      const message = this.sendQueue.shift();
+      if (message) {
+        this.ws.send(message);
+      }
+    }
   }
 
   private startHeartbeat(): void {
@@ -125,7 +141,7 @@ export abstract class BaseWsProvider extends EventEmitter {
     this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, this.reconnectMaxMs);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      void this.connect();
+      void this.start();
     }, delay);
   }
 

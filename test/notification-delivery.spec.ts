@@ -225,7 +225,10 @@ describe('notification delivery lifecycle', () => {
     await orchestrator.handleSignalCreated('sig-3');
 
     expect(redisService.eval).not.toHaveBeenCalled();
-    expect(redisService.set).not.toHaveBeenCalled();
+    const nonStatusSets = redisService.set.mock.calls.filter(
+      ([key]) => key !== 'notif:lastProcessedAt',
+    );
+    expect(nonStatusSets).toEqual([]);
   });
 
   it('updates delivery to SENT with message_id after send', async () => {

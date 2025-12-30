@@ -1,6 +1,10 @@
 import { Instrument } from './models';
 
-const QUOTE_ASSETS = ['USDT', 'USDC', 'BTC', 'ETH'];
+const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'];
+const BASE_ALIASES: Record<string, string> = {
+  XBT: 'BTC',
+  XETH: 'ETH',
+};
 
 export const normalizeCanonicalSymbol = (symbol: string): string =>
   symbol
@@ -18,18 +22,64 @@ export const splitCanonicalSymbol = (
       if (!base) {
         return null;
       }
-      return { base, quote };
+      return { base: BASE_ALIASES[base] ?? base, quote };
     }
   }
   return null;
 };
 
-export const okxSymbolFromCanonical = (symbol: string): string | null => {
+const toProviderSymbol = (provider: string, base: string, quote: string): string | null => {
+  switch (provider) {
+    case 'binance':
+    case 'bybit':
+    case 'mexc':
+      return `${base}${quote}`;
+    case 'okx':
+    case 'coinbase':
+    case 'kucoin':
+      return `${base}-${quote}`;
+    case 'kraken': {
+      const krakenBase = base === 'BTC' ? 'XBT' : base;
+      return `${krakenBase}/${quote}`;
+    }
+    case 'gateio':
+      return `${base}_${quote}`;
+    case 'bitfinex': {
+      const bitfinexQuote = quote === 'USDT' ? 'UST' : quote;
+      return `t${base}${bitfinexQuote}`;
+    }
+    case 'bitstamp':
+      return `${base}${quote}`.toLowerCase();
+    default:
+      return `${base}${quote}`;
+  }
+};
+
+const toProviderInstId = (provider: string, base: string, quote: string): string | null => {
+  switch (provider) {
+    case 'kraken': {
+      const krakenBase = base === 'BTC' ? 'XBT' : base;
+      return `${krakenBase}${quote}`;
+    }
+    default:
+      return toProviderSymbol(provider, base, quote);
+  }
+};
+
+export const providerSymbolFromCanonical = (
+  provider: string,
+  symbol: string,
+): { providerSymbol: string; providerInstId: string } | null => {
   const parts = splitCanonicalSymbol(symbol);
   if (!parts) {
     return null;
   }
-  return `${parts.base}-${parts.quote}`;
+  const providerSymbol = toProviderSymbol(provider, parts.base, parts.quote);
+  const providerInstId = toProviderInstId(provider, parts.base, parts.quote);
+  if (!providerSymbol || !providerInstId) {
+    return null;
+  }
+  return { providerSymbol, providerInstId };
 };
 
 export const buildInstrumentFromSymbol = (symbol: string): Instrument | null => {

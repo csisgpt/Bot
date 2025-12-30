@@ -5,6 +5,9 @@ import { InstrumentMapping, Ticker, Candle } from '../models';
 import { normalizeBinanceBookTicker } from '../normalizers';
 import { MarketDataProvider } from '../interfaces';
 import * as WebSocket from 'ws';
+import { createHttpClient } from '../utils/http.util';
+import { retry } from '../utils/retry.util';
+import { getProviderEndpoints } from './providers.config';
 
 interface BinanceCombinedMessage {
   stream: string;
@@ -13,15 +16,24 @@ interface BinanceCombinedMessage {
 
 @Injectable()
 export class BinanceMarketDataProvider extends BaseWsProvider implements MarketDataProvider {
+  supportsWebsocket = true;
   private tickerMappings = new Map<string, InstrumentMapping>();
   private candleMappings = new Map<string, InstrumentMapping>();
   private timeframes: string[] = [];
   private includeMiniTicker = false;
   private streams: string[] = [];
+  private readonly restClient;
 
   constructor(private readonly configService: ConfigService) {
-    const baseUrl = configService.get<string>('BINANCE_WS_URL', 'wss://stream.binance.com:9443/stream');
-    super('binance', { url: baseUrl, heartbeatMs: 20000 });
+    const endpoints = getProviderEndpoints(configService, 'binance');
+    super('binance', {
+      url: endpoints.ws ?? 'wss://stream.binance.com:9443/stream',
+      heartbeatMs: 20000,
+      reconnectBaseMs: configService.get<number>('MARKET_DATA_WS_RECONNECT_BASE_DELAY_MS', 1000),
+      reconnectMaxMs: configService.get<number>('MARKET_DATA_WS_RECONNECT_MAX_DELAY_MS', 30000),
+    });
+    const timeoutMs = configService.get<number>('MARKET_DATA_REST_TIMEOUT_MS', 10000);
+    this.restClient = createHttpClient(endpoints.rest, timeoutMs);
   }
 
   async subscribeTickers(instruments: InstrumentMapping[]): Promise<void> {
@@ -38,6 +50,58 @@ export class BinanceMarketDataProvider extends BaseWsProvider implements MarketD
     });
     this.timeframes = timeframes;
     await this.refreshStreams();
+  }
+
+  async fetchTickers(instruments: InstrumentMapping[]): Promise<Ticker[]> {
+    if (!instruments.length) {
+      return [];
+    }
+    const symbols = instruments.map((mapping) => mapping.providerSymbol.toUpperCase());
+    const response = await retry(() =>
+      this.restClient.get('/api/v3/ticker/bookTicker', {
+        params: { symbols: JSON.stringify(symbols) },
+      }),
+    );
+    const now = Date.now();
+    const data = response.data as Array<{ symbol: string; bidPrice: string; askPrice: string }>;
+    return data
+      .map((item) => {
+        const mapping = this.tickerMappings.get(item.symbol.toLowerCase()) ??
+          instruments.find((candidate) => candidate.providerSymbol.toUpperCase() === item.symbol);
+        if (!mapping) {
+          return null;
+        }
+        return normalizeBinanceBookTicker(
+          { s: item.symbol, b: item.bidPrice, a: item.askPrice, E: now },
+          mapping,
+        );
+      })
+      .filter((ticker): ticker is Ticker => Boolean(ticker));
+  }
+
+  async fetchCandles(
+    instrument: InstrumentMapping,
+    timeframe: string,
+    limit: number,
+  ): Promise<Candle[]> {
+    const response = await retry(() =>
+      this.restClient.get('/api/v3/klines', {
+        params: { symbol: instrument.providerSymbol, interval: timeframe, limit },
+      }),
+    );
+    const candles = response.data as Array<[number, string, string, string, string, string]>;
+    return candles.map((item) => ({
+      provider: this.provider,
+      canonicalSymbol: instrument.canonicalSymbol,
+      timeframe,
+      openTime: Number(item[0]),
+      open: Number(item[1]),
+      high: Number(item[2]),
+      low: Number(item[3]),
+      close: Number(item[4]),
+      volume: Number(item[5]),
+      isFinal: true,
+    }));
   }
 
   protected buildUrl(): string {
@@ -125,8 +189,8 @@ export class BinanceMarketDataProvider extends BaseWsProvider implements MarketD
     }
     this.streams = streams;
     if (this.ws) {
-      await this.disconnect();
-      await this.connect();
+      await this.stop();
+      await this.start();
     }
   }
 }

@@ -5,6 +5,10 @@ import { InstrumentMapping, Ticker, Candle } from '../models';
 import { MarketDataProvider } from '../interfaces';
 import { normalizeTickerFromBestBidAsk } from '../normalizers';
 import * as WebSocket from 'ws';
+import { createHttpClient } from '../utils/http.util';
+import { retry } from '../utils/retry.util';
+import { toInterval } from './interval-mapper';
+import { getProviderEndpoints } from './providers.config';
 
 interface OkxWsMessage {
   arg?: { channel?: string; instId?: string };
@@ -16,13 +20,22 @@ interface OkxWsMessage {
 
 @Injectable()
 export class OkxMarketDataProvider extends BaseWsProvider implements MarketDataProvider {
+  supportsWebsocket = true;
   private tickerMappings = new Map<string, InstrumentMapping>();
   private candleMappings = new Map<string, InstrumentMapping>();
   private timeframes: string[] = [];
+  private readonly restClient;
 
   constructor(private readonly configService: ConfigService) {
-    const wsUrl = configService.get<string>('OKX_WS_URL', 'wss://ws.okx.com:8443/ws/v5/public');
-    super('okx', { url: wsUrl, heartbeatMs: 20000 });
+    const endpoints = getProviderEndpoints(configService, 'okx');
+    super('okx', {
+      url: endpoints.ws ?? 'wss://ws.okx.com:8443/ws/v5/public',
+      heartbeatMs: 20000,
+      reconnectBaseMs: configService.get<number>('MARKET_DATA_WS_RECONNECT_BASE_DELAY_MS', 1000),
+      reconnectMaxMs: configService.get<number>('MARKET_DATA_WS_RECONNECT_MAX_DELAY_MS', 30000),
+    });
+    const timeoutMs = configService.get<number>('MARKET_DATA_REST_TIMEOUT_MS', 10000);
+    this.restClient = createHttpClient(endpoints.rest, timeoutMs);
   }
 
   async subscribeTickers(instruments: InstrumentMapping[]): Promise<void> {
@@ -38,6 +51,69 @@ export class OkxMarketDataProvider extends BaseWsProvider implements MarketDataP
     });
     this.timeframes = timeframes;
     this.sendSubscribe();
+  }
+
+  async fetchTickers(instruments: InstrumentMapping[]): Promise<Ticker[]> {
+    if (!instruments.length) {
+      return [];
+    }
+    const mappingByInstId = new Map(instruments.map((item) => [item.providerInstId, item]));
+    const response = await retry(
+      () =>
+        this.restClient.get('/api/v5/market/tickers', {
+          params: { instType: 'SPOT' },
+        }),
+      { attempts: 3, baseDelayMs: 500 },
+    );
+    const list = response.data?.data ?? [];
+    return (list as Array<Record<string, string>>)
+      .map((item) => {
+        const mapping = mappingByInstId.get(String(item.instId));
+        if (!mapping) {
+          return null;
+        }
+        const bid = Number(item.bidPx);
+        const ask = Number(item.askPx);
+        const last = Number(item.last);
+        const ts = Number(item.ts) || Date.now();
+        return normalizeTickerFromBestBidAsk(
+          this.provider,
+          mapping,
+          bid,
+          ask,
+          Number.isFinite(last) ? last : (bid + ask) / 2,
+          ts,
+          Number(item.vol24h),
+        );
+      })
+      .filter((ticker): ticker is Ticker => Boolean(ticker));
+  }
+
+  async fetchCandles(
+    instrument: InstrumentMapping,
+    timeframe: string,
+    limit: number,
+  ): Promise<Candle[]> {
+    const response = await retry(
+      () =>
+        this.restClient.get('/api/v5/market/candles', {
+          params: { instId: instrument.providerInstId, bar: toInterval('okx', timeframe), limit },
+        }),
+      { attempts: 3, baseDelayMs: 500 },
+    );
+    const data = response.data?.data ?? [];
+    return (data as Array<string[]>).map((item) => ({
+      provider: this.provider,
+      canonicalSymbol: instrument.canonicalSymbol,
+      timeframe,
+      openTime: Number(item[0]),
+      open: Number(item[1]),
+      high: Number(item[2]),
+      low: Number(item[3]),
+      close: Number(item[4]),
+      volume: Number(item[5]),
+      isFinal: true,
+    }));
   }
 
   protected buildUrl(): string {
@@ -160,13 +236,7 @@ export class OkxMarketDataProvider extends BaseWsProvider implements MarketDataP
   }
 
   private toOkxChannel(timeframe: string): string {
-    const normalized = timeframe.trim();
-    if (/^\d+[mhdwMHDW]$/.test(normalized)) {
-      const unit = normalized.slice(-1);
-      const value = normalized.slice(0, -1);
-      const unitToken = unit.toUpperCase();
-      return `candle${value}${unitToken}`;
-    }
+    const normalized = String(toInterval('okx', timeframe));
     return `candle${normalized}`;
   }
 

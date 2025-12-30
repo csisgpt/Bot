@@ -5,6 +5,10 @@ import { InstrumentMapping, Ticker, Candle } from '../models';
 import { MarketDataProvider } from '../interfaces';
 import { normalizeTickerFromBestBidAsk } from '../normalizers';
 import * as WebSocket from 'ws';
+import { createHttpClient } from '../utils/http.util';
+import { retry } from '../utils/retry.util';
+import { toInterval } from './interval-mapper';
+import { getProviderEndpoints } from './providers.config';
 
 interface KrakenWsEvent {
   event?: string;
@@ -16,13 +20,22 @@ interface KrakenWsEvent {
 
 @Injectable()
 export class KrakenMarketDataProvider extends BaseWsProvider implements MarketDataProvider {
+  supportsWebsocket = true;
   private tickerMappings = new Map<string, InstrumentMapping>();
   private candleMappings = new Map<string, InstrumentMapping>();
   private timeframes: string[] = [];
+  private readonly restClient;
 
   constructor(private readonly configService: ConfigService) {
-    const wsUrl = configService.get<string>('KRAKEN_WS_URL', 'wss://ws.kraken.com');
-    super('kraken', { url: wsUrl, heartbeatMs: 20000 });
+    const endpoints = getProviderEndpoints(configService, 'kraken');
+    super('kraken', {
+      url: endpoints.ws ?? 'wss://ws.kraken.com',
+      heartbeatMs: 20000,
+      reconnectBaseMs: configService.get<number>('MARKET_DATA_WS_RECONNECT_BASE_DELAY_MS', 1000),
+      reconnectMaxMs: configService.get<number>('MARKET_DATA_WS_RECONNECT_MAX_DELAY_MS', 30000),
+    });
+    const timeoutMs = configService.get<number>('MARKET_DATA_REST_TIMEOUT_MS', 10000);
+    this.restClient = createHttpClient(endpoints.rest, timeoutMs);
   }
 
   async subscribeTickers(instruments: InstrumentMapping[]): Promise<void> {
@@ -38,6 +51,65 @@ export class KrakenMarketDataProvider extends BaseWsProvider implements MarketDa
     });
     this.timeframes = timeframes;
     this.sendSubscribe();
+  }
+
+  async fetchTickers(instruments: InstrumentMapping[]): Promise<Ticker[]> {
+    if (!instruments.length) {
+      return [];
+    }
+    const results = await Promise.all(
+      instruments.map(async (mapping) => {
+        const response = await retry(() =>
+          this.restClient.get('/0/public/Ticker', {
+            params: { pair: mapping.providerInstId },
+          }),
+        );
+        const result = response.data?.result ?? {};
+        const data = result[Object.keys(result)[0]] as {
+          a?: string[];
+          b?: string[];
+          c?: string[];
+        };
+        const bid = Number(data?.b?.[0]);
+        const ask = Number(data?.a?.[0]);
+        const last = Number(data?.c?.[0]);
+        return normalizeTickerFromBestBidAsk(
+          this.provider,
+          mapping,
+          bid,
+          ask,
+          Number.isFinite(last) ? last : (bid + ask) / 2,
+          Date.now(),
+        );
+      }),
+    );
+    return results.filter((ticker): ticker is Ticker => Boolean(ticker));
+  }
+
+  async fetchCandles(
+    instrument: InstrumentMapping,
+    timeframe: string,
+    limit: number,
+  ): Promise<Candle[]> {
+    const response = await retry(() =>
+      this.restClient.get('/0/public/OHLC', {
+        params: { pair: instrument.providerInstId, interval: toInterval('kraken', timeframe) },
+      }),
+    );
+    const result = response.data?.result ?? {};
+    const series = result[Object.keys(result)[0]] as Array<string[]>;
+    return (series ?? []).slice(0, limit).map((item) => ({
+      provider: this.provider,
+      canonicalSymbol: instrument.canonicalSymbol,
+      timeframe,
+      openTime: Number(item[0]) * 1000,
+      open: Number(item[1]),
+      high: Number(item[2]),
+      low: Number(item[3]),
+      close: Number(item[4]),
+      volume: Number(item[6]),
+      isFinal: item[7] === '1',
+    }));
   }
 
   protected buildUrl(): string {

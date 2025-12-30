@@ -184,6 +184,14 @@ Start the worker with the multi-provider ingest + arbitrage + news enabled:
 pnpm dev:worker
 ```
 
+Market data v3 provider config (REST/WS):
+
+```bash
+MARKET_DATA_ENABLED_PROVIDERS=binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp
+MARKET_DATA_WS_ENABLED_PROVIDERS=binance,bybit,okx,coinbase,kraken
+MARKET_DATA_REST_POLL_INTERVAL_SECONDS=30
+```
+
 Health endpoints:
 
 - `GET /health/providers` (provider connections)

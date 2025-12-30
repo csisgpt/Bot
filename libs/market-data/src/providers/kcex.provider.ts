@@ -2,11 +2,12 @@ import { EventEmitter } from 'events';
 import { ConfigService } from '@nestjs/config';
 import { Injectable, Logger } from '@nestjs/common';
 import { MarketDataProvider } from '../interfaces';
-import { InstrumentMapping, ProviderSnapshot } from '../models';
+import { InstrumentMapping, ProviderSnapshot, Ticker, Candle } from '../models';
 
 @Injectable()
 export class KcexMarketDataProvider extends EventEmitter implements MarketDataProvider {
   readonly provider = 'kcex';
+  supportsWebsocket = false;
   private readonly logger = new Logger('kcex-provider');
   private connected = false;
   private lastMessageTs: number | null = null;
@@ -18,7 +19,7 @@ export class KcexMarketDataProvider extends EventEmitter implements MarketDataPr
     super();
   }
 
-  async connect(): Promise<void> {
+  async start(): Promise<void> {
     const enabled = this.configService.get<boolean>('KCEX_ENABLE', false);
     if (!enabled) {
       this.logger.log(
@@ -36,7 +37,7 @@ export class KcexMarketDataProvider extends EventEmitter implements MarketDataPr
     throw new Error('پیاده‌سازی نشده: مستندات KCEX موجود نیست');
   }
 
-  async disconnect(): Promise<void> {
+  async stop(): Promise<void> {
     this.connected = false;
   }
 
@@ -46,6 +47,18 @@ export class KcexMarketDataProvider extends EventEmitter implements MarketDataPr
 
   async subscribeCandles(_instruments: InstrumentMapping[], _timeframes: string[]): Promise<void> {
     return;
+  }
+
+  async fetchTickers(_instruments: InstrumentMapping[]): Promise<Ticker[]> {
+    return [];
+  }
+
+  async fetchCandles(
+    _instrument: InstrumentMapping,
+    _timeframe: string,
+    _limit: number,
+  ): Promise<Candle[]> {
+    return [];
   }
 
   getSnapshot(): ProviderSnapshot {

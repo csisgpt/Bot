@@ -194,6 +194,16 @@ export class NotificationOrchestratorService {
       const cooldownHit = rateLimitHit
         ? false
         : await this.checkCooldown(targetChatId, entityType, entity, preferences);
+      if (rateLimitHit) {
+        await this.recordSkipped(entityType, entityId, targetChatId, 'rate_limit');
+        this.bumpSkip(summary, 'rate_limit');
+        continue;
+      }
+      if (cooldownHit) {
+        await this.recordSkipped(entityType, entityId, targetChatId, 'cooldown');
+        this.bumpSkip(summary, 'cooldown');
+        continue;
+      }
       const decision = evaluatePolicy({
         entityType,
         preferences,
@@ -202,8 +212,8 @@ export class NotificationOrchestratorService {
         signal: entityType === 'SIGNAL' ? (entity as SignalSnapshot) : undefined,
         news: entityType === 'NEWS' ? (entity as NewsSnapshot) : undefined,
         arb: entityType === 'ARB' ? (entity as ArbSnapshot) : undefined,
-        rateLimitHit,
-        cooldownHit,
+        rateLimitHit: false,
+        cooldownHit: false,
       });
 
       if (decision.action !== 'ALLOW') {

@@ -7,6 +7,7 @@ import {
   MarketDataProvider,
   Candle,
   Ticker,
+  InstrumentMapping,
 } from '@libs/market-data';
 import { Queue } from 'bullmq';
 import { MARKET_DATA_QUEUE_NAME } from '@libs/core';
@@ -22,6 +23,9 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
   private readonly timeframes: string[];
   private readonly legacyCandleCompatEnabled: boolean;
   private readonly providerListeners = new Map<string, () => void>();
+  private readonly restPollIntervalMs: number;
+  private readonly restPollTimers = new Map<string, NodeJS.Timeout>();
+  private readonly restPollLogged = new Set<string>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -40,6 +44,8 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       'LEGACY_CANDLE_COMPAT_ENABLED',
       true,
     );
+    this.restPollIntervalMs =
+      this.configService.get<number>('MARKET_DATA_REST_POLL_INTERVAL_SECONDS', 30) * 1000;
   }
 
   async onModuleInit(): Promise<void> {
@@ -51,7 +57,12 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
     const symbols = await this.activeSymbolsService.resolveActiveSymbols();
     this.instrumentRegistry.setActiveSymbols(symbols);
     const providers = this.providerRegistry.getEnabledProviders();
+    const wsEnabled = new Set(
+      this.providerRegistry.getWsEnabledProviders().map((provider) => provider.provider),
+    );
     const instruments = this.instrumentRegistry.getInstruments();
+
+    await this.providerRegistry.startAll();
 
     for (const provider of providers) {
       const mappings = this.instrumentRegistry.getMappingsForProvider(provider.provider);
@@ -75,18 +86,21 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
 
       await provider.subscribeTickers(mappings);
       await provider.subscribeCandles(mappings, this.timeframes);
+
+      this.scheduleRestPolling(provider, mappings, this.timeframes, wsEnabled.has(provider.provider));
     }
 
     if (!providers.length || !instruments.length) {
       this.logger.warn('هیچ ارائه‌دهنده یا نمادی برای بازار چندمنبعی فعال نیست');
     }
-
-    await this.providerRegistry.startAll();
   }
 
   async onModuleDestroy(): Promise<void> {
     for (const cleanup of this.providerListeners.values()) {
       cleanup();
+    }
+    for (const timer of this.restPollTimers.values()) {
+      clearInterval(timer);
     }
     await this.providerRegistry.stopAll();
   }
@@ -185,6 +199,71 @@ export class MarketDataIngestService implements OnModuleInit, OnModuleDestroy {
       attempts: 3,
       backoff: { type: 'exponential', delay: 500 },
     });
+  }
+
+  private scheduleRestPolling(
+    provider: MarketDataProvider,
+    mappings: InstrumentMapping[],
+    timeframes: string[],
+    wsEnabled: boolean,
+  ): void {
+    if (this.restPollTimers.has(provider.provider)) {
+      return;
+    }
+
+    const poll = async () => {
+      const snapshot = provider.getSnapshot();
+      if (provider.supportsWebsocket && wsEnabled && snapshot.connected) {
+        return;
+      }
+
+      if (!this.restPollLogged.has(provider.provider)) {
+        this.restPollLogged.add(provider.provider);
+        this.logger.warn(
+          JSON.stringify({ event: 'rest_poll_started', provider: provider.provider }),
+        );
+      }
+
+      try {
+        const tickers = await provider.fetchTickers(mappings);
+        for (const ticker of tickers) {
+          await this.handleTicker(ticker);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.warn(
+          JSON.stringify({ event: 'rest_poll_error', provider: provider.provider, message }),
+        );
+      }
+
+      for (const mapping of mappings) {
+        for (const timeframe of timeframes) {
+          try {
+            const candles = await provider.fetchCandles(mapping, timeframe, 2);
+            for (const candle of candles) {
+              await this.handleCandle(candle);
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            this.logger.warn(
+              JSON.stringify({
+                event: 'rest_poll_error',
+                provider: provider.provider,
+                symbol: mapping.canonicalSymbol,
+                timeframe,
+                message,
+              }),
+            );
+          }
+        }
+      }
+    };
+
+    const timer = setInterval(() => {
+      void poll();
+    }, this.restPollIntervalMs);
+    this.restPollTimers.set(provider.provider, timer);
+    void poll();
   }
 
   private inferAssetType(symbol: string): string {

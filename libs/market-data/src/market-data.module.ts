@@ -8,6 +8,11 @@ import { OkxMarketDataProvider } from './providers/okx.provider';
 import { KcexMarketDataProvider } from './providers/kcex.provider';
 import { CoinbaseMarketDataProvider } from './providers/coinbase.provider';
 import { KrakenMarketDataProvider } from './providers/kraken.provider';
+import { KucoinMarketDataProvider } from './providers/kucoin.provider';
+import { GateioMarketDataProvider } from './providers/gateio.provider';
+import { MexcMarketDataProvider } from './providers/mexc.provider';
+import { BitfinexMarketDataProvider } from './providers/bitfinex.provider';
+import { BitstampMarketDataProvider } from './providers/bitstamp.provider';
 
 @Module({
   imports: [ConfigModule],
@@ -20,6 +25,11 @@ import { KrakenMarketDataProvider } from './providers/kraken.provider';
     KcexMarketDataProvider,
     CoinbaseMarketDataProvider,
     KrakenMarketDataProvider,
+    KucoinMarketDataProvider,
+    GateioMarketDataProvider,
+    MexcMarketDataProvider,
+    BitfinexMarketDataProvider,
+    BitstampMarketDataProvider,
     {
       provide: MARKET_DATA_PROVIDERS,
       useFactory: (
@@ -29,7 +39,24 @@ import { KrakenMarketDataProvider } from './providers/kraken.provider';
         kcex: KcexMarketDataProvider,
         coinbase: CoinbaseMarketDataProvider,
         kraken: KrakenMarketDataProvider,
-      ) => [binance, bybit, okx, kcex, coinbase, kraken],
+        kucoin: KucoinMarketDataProvider,
+        gateio: GateioMarketDataProvider,
+        mexc: MexcMarketDataProvider,
+        bitfinex: BitfinexMarketDataProvider,
+        bitstamp: BitstampMarketDataProvider,
+      ) => [
+        binance,
+        bybit,
+        okx,
+        kcex,
+        coinbase,
+        kraken,
+        kucoin,
+        gateio,
+        mexc,
+        bitfinex,
+        bitstamp,
+      ],
       inject: [
         BinanceMarketDataProvider,
         BybitMarketDataProvider,
@@ -37,6 +64,11 @@ import { KrakenMarketDataProvider } from './providers/kraken.provider';
         KcexMarketDataProvider,
         CoinbaseMarketDataProvider,
         KrakenMarketDataProvider,
+        KucoinMarketDataProvider,
+        GateioMarketDataProvider,
+        MexcMarketDataProvider,
+        BitfinexMarketDataProvider,
+        BitstampMarketDataProvider,
       ],
     },
   ],

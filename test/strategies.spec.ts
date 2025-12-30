@@ -18,7 +18,7 @@ describe('strategies', () => {
     const candles = buildCandles(closes);
     const strategy = createBreakoutStrategy({ lookback: 5 });
 
-    const signal = strategy.run({
+    const signal = strategy.evaluate({
       candles,
       instrument: 'XAUTUSDT',
       interval: '15m',
@@ -49,7 +49,7 @@ describe('strategies', () => {
       rsiSellThreshold: 70,
     });
 
-    const signal = strategy.run({
+    const signal = strategy.evaluate({
       candles,
       instrument: 'BTCUSDT',
       interval: '1h',
@@ -69,7 +69,7 @@ describe('strategies', () => {
       rsiSellThreshold: 70,
     });
 
-    const signal = strategy.run({
+    const signal = strategy.evaluate({
       candles,
       instrument: 'ETHUSDT',
       interval: '15m',
@@ -82,19 +82,19 @@ describe('strategies', () => {
 
   it('macd strategy emits BUY on crossover', () => {
     const closes: number[] = [];
-    let price = 100;
-    for (let i = 0; i < 30; i += 1) {
-      price -= 0.6;
+    let price = 200;
+    for (let i = 0; i < 80; i += 1) {
+      price -= 1.2;
       closes.push(price);
     }
-    for (let i = 0; i < 30; i += 1) {
-      price += 0.8;
+    for (let i = 0; i < 80; i += 1) {
+      price += 1.5;
       closes.push(price);
     }
     const candles = buildCandles(closes);
     const strategy = createMacdStrategy({ fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 });
 
-    const signal = strategy.run({
+    const signal = strategy.evaluate({
       candles,
       instrument: 'BTCUSDT',
       interval: '1h',
