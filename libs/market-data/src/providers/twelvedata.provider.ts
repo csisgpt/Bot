@@ -32,7 +32,6 @@ export class TwelveDataMarketDataProvider extends BaseWsProvider implements Mark
   private readonly retryAttempts: number;
   private readonly retryBaseDelayMs: number;
   private readonly tickerMappings = new Map<string, InstrumentMapping>();
-  private appHeartbeatTimer?: NodeJS.Timeout;
 
   constructor(private readonly configService: ConfigService) {
     const endpoints = getProviderEndpoints(configService, 'twelvedata');
@@ -75,16 +74,18 @@ export class TwelveDataMarketDataProvider extends BaseWsProvider implements Mark
     }
 
     const results: Ticker[] = [];
+
+    // Prefer TwelveData /price for latest tick (fast, lightweight) instead of /time_series.
+    // Response shape varies (single vs multi), so parsing must be defensive.
     for (const batch of batches) {
-      const symbols = batch.map((mapping) => mapping.providerSymbol).join(',');
+      const symbols = batch.map((mapping) => mapping.providerSymbol);
+
       try {
         const response = await retry(
           () =>
-            this.restClient.get('/time_series', {
+            this.restClient.get('/price', {
               params: {
-                symbol: symbols,
-                interval: '1min',
-                outputsize: 1,
+                symbol: symbols.join(','),
                 apikey: this.apiKey,
               },
             }),
@@ -94,23 +95,22 @@ export class TwelveDataMarketDataProvider extends BaseWsProvider implements Mark
             shouldRetry: this.isRetryableError,
           },
         );
-        const entries = this.parseTimeSeriesResponse(response.data, true);
-        for (const entry of entries) {
-          const mapping = mappingBySymbol.get(entry.symbol.toUpperCase());
-          if (!mapping) {
-            continue;
-          }
+
+        const items = this.parsePriceResponse(response.data);
+        for (const item of items) {
+          const mapping = mappingBySymbol.get(item.symbol.toUpperCase());
+          if (!mapping) continue;
+
+          // TwelveData /price has one price value; map it as bestBid/bestAsk equivalently.
           const ticker = normalizeTickerFromBestBidAsk(
             this.provider,
             mapping,
-            entry.close,
-            entry.close,
-            entry.close,
-            entry.ts,
+            item.price,
+            item.price,
+            item.price,
+            item.ts,
           );
-          if (ticker) {
-            results.push(ticker);
-          }
+          if (ticker) results.push(ticker);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -118,7 +118,7 @@ export class TwelveDataMarketDataProvider extends BaseWsProvider implements Mark
           JSON.stringify({
             event: 'twelvedata_fetch_tickers_failed',
             provider: this.provider,
-            symbols,
+            symbols: symbols.join(','),
             message,
           }),
         );
@@ -126,6 +126,35 @@ export class TwelveDataMarketDataProvider extends BaseWsProvider implements Mark
     }
 
     return results;
+  }
+
+  private parsePriceResponse(data: unknown): Array<{ symbol: string; price: number; ts: number }> {
+    const ts = Date.now();
+
+    // Common single-symbol response: { symbol: "EUR/USD", price: "1.0912" }
+    if (data && typeof data === 'object') {
+      const obj = data as any;
+      if (typeof obj.symbol === 'string' && (typeof obj.price === 'string' || typeof obj.price === 'number')) {
+        const price = Number(obj.price);
+        return Number.isFinite(price) ? [{ symbol: obj.symbol, price, ts }] : [];
+      }
+
+      // Multi-symbol response often looks like:
+      // { "EUR/USD": { "price": "1.09" }, "AAPL": { "price": "192.1" }, ... }
+      const out: Array<{ symbol: string; price: number; ts: number }> = [];
+      for (const [symbol, v] of Object.entries(obj)) {
+        if (!symbol || symbol === 'status' || symbol === 'message' || symbol === 'code') continue;
+        const priceVal = (v as any)?.price ?? (v as any)?.last ?? v;
+        const price = Number(priceVal);
+        if (Number.isFinite(price)) {
+          out.push({ symbol, price, ts });
+        }
+      }
+      return out;
+    }
+
+    // Unexpected shapes -> empty.
+    return [];
   }
 
   async fetchCandles(
@@ -174,7 +203,6 @@ export class TwelveDataMarketDataProvider extends BaseWsProvider implements Mark
   protected onOpen(): void {
     this.logger.log(JSON.stringify({ event: 'provider_connected', provider: this.provider }));
     this.sendSubscribe();
-    this.startAppHeartbeat();
   }
 
   protected onMessage(data: WebSocket.RawData): void {
@@ -222,7 +250,8 @@ export class TwelveDataMarketDataProvider extends BaseWsProvider implements Mark
 
   protected onClose(): void {
     this.logger.warn(JSON.stringify({ event: 'provider_disconnected', provider: this.provider }));
-    this.stopAppHeartbeat();
+    // TwelveData WS does not require an application-level heartbeat message.
+    // The underlying WebSocket ping/pong handled by BaseWsProvider is enough.
   }
 
   private sendSubscribe(): void {
@@ -239,20 +268,6 @@ export class TwelveDataMarketDataProvider extends BaseWsProvider implements Mark
       action: 'subscribe',
       params: { symbols: symbols.join(',') },
     });
-  }
-
-  private startAppHeartbeat(): void {
-    this.stopAppHeartbeat();
-    this.appHeartbeatTimer = setInterval(() => {
-      this.send({ action: 'heartbeat' });
-    }, 10_000);
-  }
-
-  private stopAppHeartbeat(): void {
-    if (this.appHeartbeatTimer) {
-      clearInterval(this.appHeartbeatTimer);
-      this.appHeartbeatTimer = undefined;
-    }
   }
 
   private parseTimeSeriesResponse(
