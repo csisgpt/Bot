@@ -1,4 +1,5 @@
 import { escapeHtml } from './formatting.utils';
+import { normalizeCanonicalSymbol } from '@libs/market-data';
 
 export interface PriceAggregation {
   symbol: string;
@@ -8,7 +9,7 @@ export interface PriceAggregation {
 
 type PricesFeedFormat = 'table' | 'compact'; // برای سازگاری؛ "table" رو هم می‌گیریم ولی خروجی‌مون جدولی نیست.
 
-const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'] as const;
+const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH', 'IRT', 'IRR'] as const;
 
 const PROVIDER_META: Record<string, { label: string; emoji: string }> = {
   binance: { label: 'Binance', emoji: '🟡' },
@@ -19,6 +20,8 @@ const PROVIDER_META: Record<string, { label: string; emoji: string }> = {
   coinbase: { label: 'Coinbase', emoji: '🔵' },
   mexc: { label: 'MEXC', emoji: '🟦' },
   gate: { label: 'Gate', emoji: '🟥' },
+  twelvedata: { label: 'TwelveData', emoji: '🟦' },
+  navasan: { label: 'Navasan', emoji: '🟧' },
 };
 
 const normalizeProviderKey = (p: string) => p.trim().toLowerCase();
@@ -71,6 +74,87 @@ const prettySymbol = (raw: string): string => {
 
 const divider = '────────────';
 
+const parseCsvMap = (raw?: string): Record<string, string> => {
+  if (!raw) return {};
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .reduce<Record<string, string>>((acc, entry) => {
+      const [key, value] = entry.split(':').map((part) => part.trim());
+      if (!key || !value) return acc;
+      acc[normalizeCanonicalSymbol(key)] = value;
+      return acc;
+    }, {});
+};
+
+const resolveIranSymbolLabels = (): Record<string, string> =>
+  parseCsvMap(process.env.FEED_IRAN_SYMBOL_LABELS);
+const resolveIranSymbolUnits = (): Record<string, string> =>
+  parseCsvMap(process.env.FEED_IRAN_SYMBOL_UNITS);
+const resolveIranSymbolExtraUnits = (): Record<string, string> =>
+  parseCsvMap(process.env.FEED_IRAN_SYMBOL_EXTRA_UNITS);
+
+const resolveIranValueUnit = (): 'toman' | 'rial' =>
+  (process.env.FEED_IRAN_VALUE_UNIT ?? 'toman').toLowerCase() === 'rial' ? 'rial' : 'toman';
+const resolveIranShowBoth = (): boolean =>
+  (process.env.FEED_IRAN_SHOW_TOMAN_RIAL_BOTH ?? 'true').toLowerCase() !== 'false';
+
+const formatIranNumber = (value: number): string =>
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.round(value));
+
+const isIranSymbol = (symbol: string): boolean => {
+  const normalized = normalizeCanonicalSymbol(symbol);
+  if (normalized.endsWith('IRT') || normalized.endsWith('IRR')) {
+    return true;
+  }
+  return ['SEKKEH', 'ABSHODEH', 'GOLD18', '18AYAR'].some((token) => normalized.includes(token));
+};
+
+const getIranLabel = (symbol: string): string => {
+  const normalized = normalizeCanonicalSymbol(symbol);
+  const labels = resolveIranSymbolLabels();
+  return labels[normalized] ?? prettySymbol(normalized);
+};
+
+const getIranUnit = (symbol: string, fallback: string): string => {
+  const normalized = normalizeCanonicalSymbol(symbol);
+  const units = resolveIranSymbolUnits();
+  return units[normalized] ?? fallback;
+};
+
+const getIranExtraUnit = (symbol: string): string | null => {
+  const normalized = normalizeCanonicalSymbol(symbol);
+  const units = resolveIranSymbolExtraUnits();
+  return units[normalized] ?? null;
+};
+
+const formatIranPrice = (value: number, symbol: string): { primaryText: string; secondaryText?: string } => {
+  if (!Number.isFinite(value)) {
+    return { primaryText: 'N/A' };
+  }
+  const iranValueUnit = resolveIranValueUnit();
+  const iranShowBoth = resolveIranShowBoth();
+  if (iranValueUnit === 'rial') {
+    const primary = formatIranNumber(value);
+    const secondary = formatIranNumber(value / 10);
+    const primaryUnit = getIranUnit(symbol, 'ریال');
+    const secondaryUnit = 'تومان';
+    return {
+      primaryText: `${primary} ${primaryUnit}`,
+      secondaryText: iranShowBoth ? `${secondary} ${secondaryUnit}` : undefined,
+    };
+  }
+  const primary = formatIranNumber(value);
+  const secondary = formatIranNumber(value * 10);
+  const primaryUnit = getIranUnit(symbol, 'تومان');
+  const secondaryUnit = 'ریال';
+  return {
+    primaryText: `${primary} ${primaryUnit}`,
+    secondaryText: iranShowBoth ? `${secondary} ${secondaryUnit}` : undefined,
+  };
+};
+
 const cleanLines = (lines: string[]) =>
   lines
     .map((x) => x.trimEnd())
@@ -94,6 +178,7 @@ export const formatPricesFeedMessage = (params: {
 
   for (const ag of aggregations) {
     const symbol = escapeHtml(prettySymbol(ag.symbol));
+    const iranSymbol = isIranSymbol(ag.symbol);
 
     const entries = (ag.entries ?? [])
       .filter((e) => isFiniteNumber(e.price))
@@ -132,6 +217,7 @@ export const formatPricesFeedMessage = (params: {
     )})</i>`;
 
     // فهرست پرووایدرها (بدون حس جدول)
+    const formatEntryPrice = iranSymbol ? (value: number) => formatIranNumber(value) : formatPrice;
     const providerLines =
       format === 'compact'
         ? // compact: حداکثر 3 مورد (بهترین + چندتا از بقیه)
@@ -140,23 +226,34 @@ export const formatPricesFeedMessage = (params: {
             .map((e, idx) => {
               const p = providerDisplay(e.provider);
               const tag = idx === 0 ? '🏷️ <i>Best</i>' : '•';
-              return `${tag} ${p.emoji} <b>${p.text}</b> — <code>${formatPrice(e.price)}</code>`;
+              return `${tag} ${p.emoji} <b>${p.text}</b> — <code>${formatEntryPrice(e.price)}</code>`;
             })
         : // "table" => detailed ولی غیرجدولی
           entries.map((e, idx) => {
             const p = providerDisplay(e.provider);
             const isBest = idx === 0;
             const bullet = isBest ? '🏷️ <i>Best</i>' : '•';
-            return `${bullet} ${p.emoji} <b>${p.text}</b> — <code>${formatPrice(e.price)}</code>`;
+            return `${bullet} ${p.emoji} <b>${p.text}</b> — <code>${formatEntryPrice(e.price)}</code>`;
           });
 
     const block: string[] = [];
     block.push(`🔹 <b>${symbol}</b>`);
-    block.push(
-      `💰 <i>Best</i>: <code>${formatPrice(best.price)}</code>  <i>via</i> ${bestP.emoji} <b>${bestP.text}</b>`,
-    );
-    block.push(rangeText);
-    block.push(spreadText);
+    if (iranSymbol) {
+      const label = escapeHtml(getIranLabel(ag.symbol));
+      const extraUnit = getIranExtraUnit(ag.symbol);
+      const extraSuffix = extraUnit ? ` — <i>هر</i> ${escapeHtml(extraUnit)}` : '';
+      const priceText = formatIranPrice(best.price, ag.symbol);
+      block.push(`🇮🇷 <b>${label}</b>`);
+      block.push(
+        `💵 <i>Price</i>: <code>${priceText.primaryText}</code>${priceText.secondaryText ? `  <i>(${priceText.secondaryText})</i>` : ''}${extraSuffix}`,
+      );
+    } else {
+      block.push(
+        `💰 <i>Best</i>: <code>${formatPrice(best.price)}</code>  <i>via</i> ${bestP.emoji} <b>${bestP.text}</b>`,
+      );
+      block.push(rangeText);
+      block.push(spreadText);
+    }
     block.push(''); // فاصله نرم
     block.push('🧩 <i>Providers</i>');
     block.push(...providerLines);

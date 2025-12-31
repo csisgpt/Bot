@@ -44,8 +44,6 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     for (const feed of feedsConfig) {
-      console.log('helllooooooooooooooo there')
-      console.log(feed)
       if (!feed.enabled) continue;
       if (!feed.schedule) continue;
 
@@ -114,14 +112,15 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const symbols = uniq(feed.options.symbols.map(normalizeCanonicalSymbol).filter(Boolean));
+    const symbols = this.resolvePricesSymbols(feed);
     if (symbols.length === 0) {
       this.logger.warn(JSON.stringify({ event: 'feed_no_symbols', feedId: feed.id, runId }));
       return;
     }
 
-    const providers = feed.options.providers.length
-      ? feed.options.providers
+    const providerNames = this.resolvePricesProviders(feed);
+    const providers = providerNames.length
+      ? providerNames
         .map((name) => this.providerRegistry.getProviderByName(name))
         .filter((p): p is NonNullable<typeof p> => Boolean(p))
       : this.providerRegistry.getEnabledProviders();
@@ -235,6 +234,24 @@ export class FeedRunnerService implements OnModuleInit, OnModuleDestroy {
         } as InstrumentMapping;
       })
       .filter((m): m is InstrumentMapping => Boolean(m));
+  }
+
+  private resolvePricesSymbols(feed: PricesFeedConfig): string[] {
+    const raw = this.configService.get<unknown>('FEED_PRICES_SYMBOLS');
+    const envSymbols = asStringList(raw);
+    const base = envSymbols.length ? envSymbols : feed.options.symbols;
+    return uniq(base.map(normalizeCanonicalSymbol).filter(Boolean));
+  }
+
+  private resolvePricesProviders(feed: PricesFeedConfig): string[] {
+    const raw = this.configService.get<unknown>('FEED_PRICES_PROVIDERS');
+    const envProviders = asStringList(raw);
+    const base = envProviders.length ? envProviders : feed.options.providers;
+    return uniq(
+      base
+        .map((name) => name.trim().toLowerCase())
+        .filter(Boolean),
+    );
   }
 
   private async runNewsFeed(feed: NewsFeedConfig, runId: string): Promise<void> {

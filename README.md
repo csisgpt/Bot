@@ -177,6 +177,7 @@ Define schedules (cron) and default symbols in code. Feed destinations can be co
 
 - `TELEGRAM_BOT_TOKEN`
 - `FEED_PRICES_DESTINATIONS`, `FEED_NEWS_DESTINATIONS`, `FEED_SIGNALS_DESTINATIONS` (comma-separated chat IDs)
+- `FEED_PRICES_SYMBOLS` / `FEED_PRICES_PROVIDERS` (optional overrides for price feeds)
 - `MARKET_DATA_ENABLED_PROVIDERS` / `MARKET_DATA_WS_ENABLED_PROVIDERS`
 - `NEWS_ENABLED_PROVIDERS`
 - `ARB_ENABLED_PROVIDERS`
@@ -199,6 +200,28 @@ MARKET_DATA_WS_ENABLED_PROVIDERS=binance,bybit,okx,coinbase,kraken
 # MARKET_DATA_ENABLED_PROVIDERS=...,twelvedata,navasan
 # MARKET_DATA_WS_ENABLED_PROVIDERS=...,twelvedata
 MARKET_DATA_REST_POLL_INTERVAL_SECONDS=30
+```
+
+### How to add Forex/Stocks/Iran symbols to the price feed
+
+Use env overrides to avoid editing `feeds.config.ts`:
+
+```bash
+FEED_PRICES_SYMBOLS=BTCUSDT,ETHUSDT,EURUSD,USDJPY,XAUUSD,AAPLUSD,USDIRT,EURIRT,SEKKEHIRT,ABSHODEHIRT,GOLD18IRT
+FEED_PRICES_PROVIDERS=binance,bybit,okx,coinbase,kraken,twelvedata,navasan
+```
+
+For Navasan mappings, set symbol overrides:
+
+```bash
+MARKET_DATA_SYMBOL_OVERRIDES_NAVASAN=USDIRT:usd_sell,EURIRT:eur,SEKKEHIRT:sekkeh,ABSHODEHIRT:abshodeh,GOLD18IRT:18ayar
+```
+
+API keys are required when using these providers:
+
+```bash
+TWELVEDATA_API_KEY=...
+NAVASAN_API_KEY=...
 ```
 
 Health endpoints:

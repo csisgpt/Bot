@@ -325,6 +325,13 @@ const envObject = z
     FEED_PRICES_DESTINATIONS: csv([]).default([]),
     FEED_NEWS_DESTINATIONS: csv([]).default([]),
     FEED_SIGNALS_DESTINATIONS: csv([]).default([]),
+    FEED_PRICES_SYMBOLS: csv([]).default([]),
+    FEED_PRICES_PROVIDERS: csv([]).default([]),
+    FEED_IRAN_VALUE_UNIT: z.enum(["toman", "rial"]).default("toman"),
+    FEED_IRAN_SHOW_TOMAN_RIAL_BOTH: toBool(true).default(true),
+    FEED_IRAN_SYMBOL_LABELS: z.string().trim().optional(),
+    FEED_IRAN_SYMBOL_UNITS: z.string().trim().optional(),
+    FEED_IRAN_SYMBOL_EXTRA_UNITS: z.string().trim().optional(),
 
     RUN_API: toBool(true).default(true),
     RUN_WORKER: toBool(false).default(false),
