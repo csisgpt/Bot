@@ -74,7 +74,7 @@ export const fromProviderInterval = (provider: string, providerInterval: string)
   }
 };
 
-export const toInterval = (provider: string, interval: string): string | number => {
+export const toInterval = (provider: string, interval: string): string | number | null => {
   // if (!isCanonicalInterval(interval)) {
   //   throw new Error(`Unsupported canonical interval: ${interval}`);
   // }
@@ -143,6 +143,19 @@ export const toInterval = (provider: string, interval: string): string | number 
         '4h': 14400,
         '1d': 86400,
       }[i];
+
+    case 'twelvedata':
+      return {
+        '1m': '1min',
+        '5m': '5min',
+        '15m': '15min',
+        '1h': '1h',
+        '4h': '4h',
+        '1d': '1day',
+      }[i];
+
+    case 'navasan':
+      return i === '1d' ? '1d' : null;
 
     default:
       return i;

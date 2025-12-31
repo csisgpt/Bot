@@ -177,6 +177,7 @@ Define schedules (cron) and default symbols in code. Feed destinations can be co
 
 - `TELEGRAM_BOT_TOKEN`
 - `FEED_PRICES_DESTINATIONS`, `FEED_NEWS_DESTINATIONS`, `FEED_SIGNALS_DESTINATIONS` (comma-separated chat IDs)
+- `FEED_PRICES_SYMBOLS` / `FEED_PRICES_PROVIDERS` (optional overrides for price feeds)
 - `MARKET_DATA_ENABLED_PROVIDERS` / `MARKET_DATA_WS_ENABLED_PROVIDERS`
 - `NEWS_ENABLED_PROVIDERS`
 - `ARB_ENABLED_PROVIDERS`
@@ -195,7 +196,56 @@ Market data v3 provider config (REST/WS):
 ```bash
 MARKET_DATA_ENABLED_PROVIDERS=binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp
 MARKET_DATA_WS_ENABLED_PROVIDERS=binance,bybit,okx,coinbase,kraken
+# Enable TwelveData/Navasan by adding them to the list:
+# MARKET_DATA_ENABLED_PROVIDERS=...,twelvedata,navasan
+# MARKET_DATA_WS_ENABLED_PROVIDERS=...,twelvedata
 MARKET_DATA_REST_POLL_INTERVAL_SECONDS=30
+```
+
+### How to add Forex/Stocks/Iran symbols to the price feed
+
+Use env overrides to avoid editing `feeds.config.ts`:
+
+```bash
+FEED_PRICES_SYMBOLS=BTCUSDT,ETHUSDT,EURUSD,USDJPY,XAUUSD,AAPLUSD,USDIRT,EURIRT,SEKKEHIRT,ABSHODEHIRT,GOLD18IRT
+FEED_PRICES_PROVIDERS=binance,bybit,okx,coinbase,kraken,twelvedata,navasan,brsapi_market,bonbast
+```
+
+For Navasan mappings, set symbol overrides:
+
+```bash
+MARKET_DATA_SYMBOL_OVERRIDES_NAVASAN=USDIRT:usd_sell,EURIRT:eur,SEKKEHIRT:sekkeh,ABSHODEHIRT:abshodeh,GOLD18IRT:18ayar
+```
+
+For BrsApi/Bonbast, use overrides if needed (preferred key + alias):
+
+```bash
+MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET=USDIRT:USD,EURIRT:EUR,SEKKEHIRT:IR_COIN_EMAMI,ABSHODEHIRT:IR_GOLD_MELTED,GOLD18IRT:IR_GOLD_18K
+MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI=USDIRT:USD,EURIRT:EUR
+MARKET_DATA_SYMBOL_OVERRIDES_BONBAST=USDIRT:usd1,EURIRT:eur1
+```
+
+API keys are required when using these providers:
+
+```bash
+TWELVEDATA_API_KEY=...
+NAVASAN_API_KEY=...
+```
+
+BrsApi (free) uses the Gold/Currency endpoint (`https://brsapi.ir/Api/Market/Gold_Currency.php`) and requires (preferred key + alias):
+
+```bash
+BRSAPI_MARKET_API_KEY=...
+BRSAPI_API_KEY=...
+```
+
+Preferred config keys use the `BRSAPI_MARKET_` prefix (REST URL, timeouts, retries). `BRSAPI_*` keys are accepted as aliases for backward compatibility.
+
+Bonbast (paid) requires:
+
+```bash
+BONBAST_USERNAME=...
+BONBAST_HASH=...
 ```
 
 Health endpoints:
