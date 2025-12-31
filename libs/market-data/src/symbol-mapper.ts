@@ -1,294 +1,110 @@
-import { Instrument } from './models';
+import { InstrumentMapping } from '../models';
+import { parseOverrides } from '../utils/overrides.util';
 
-const QUOTE_ASSETS = [
-  // IMPORTANT: longest first to avoid USD matching before USDT/USDC
-  'USDT',
-  'USDC',
-  'USD',
-  'EUR',
-  'GBP',
-  'JPY',
-  'CHF',
-  'AUD',
-  'CAD',
-  'TRY',
-  'AED',
-  'IRT',
-  'IRR',
-  'BTC',
-  'ETH',
-];
+// Quote های استاندارد
+const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'TRY', 'AED', 'IRT', 'IRR'];
 
-const FIAT_ASSETS = new Set([
-  'USD',
-  'EUR',
-  'GBP',
-  'JPY',
-  'CHF',
-  'AUD',
-  'CAD',
-  'TRY',
-  'AED',
-  'IRR',
-  'IRT',
-]);
-
-const COMMODITY_BASES = new Set(['XAU', 'XAG', 'XPT', 'XPD']);
-
-const BASE_ALIASES: Record<string, string> = {
-  XBT: 'BTC',
-  XETH: 'ETH',
+// تمایز سهام در TwelveData
+const isEquity = (symbol: { base: string; quote: string }) => {
+  // اگر quote از بین ارزهای معروف نباشد، آن را equity در نظر بگیر
+  return !QUOTE_ASSETS.includes(symbol.quote);
 };
 
-const PROVIDER_UNSUPPORTED_QUOTES: Record<string, string[]> = {
-  // Coinbase: USDT pair coverage is not reliable; prefer USD/USDC
-  coinbase: ['USDT'],
-};
+export interface SplitSymbol {
+  base: string;
+  quote: string;
+}
 
-type QuoteFallbackMap = Record<string, Record<string, string>>;
-// provider -> { fromQuote -> toQuote }
-const PROVIDER_QUOTE_FALLBACKS: QuoteFallbackMap = {
-  // If canonical is BTCUSDT, coinbase can be BTC-USD or BTC-USDC depending on your preference
-  coinbase: { USDT: 'USD' },
-  // you can add more later if needed
-};
+/**
+ * تقسیم سمبل به base/quote از روی convention
+ */
+export const applyQuoteRules = (symbol: string): SplitSymbol | null => {
+  if (!symbol || typeof symbol !== 'string') return null;
+  const s = symbol.trim().toUpperCase();
 
-const normalizeCanonicalSymbol = (symbol: string): string =>
-  symbol
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
-
-export { normalizeCanonicalSymbol };
-
-const parseOverrides = (raw?: string): Record<string, string> => {
-  // format: "BTCUSDT:BTC-USD,ETHUSDT:ETH-USD"
-  const map: Record<string, string> = {};
-  if (!raw) return map;
-
-  raw
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .forEach((pair) => {
-      const [k, v] = pair.split(':').map((x) => x.trim());
-      if (k && v) map[normalizeCanonicalSymbol(k)] = v;
-    });
-
-  return map;
-};
-
-const getSortedQuotes = (): string[] =>
-  [...QUOTE_ASSETS].sort((a, b) => b.length - a.length);
-
-export const splitCanonicalSymbol = (
-  symbol: string,
-): { base: string; quote: string } | null => {
-  const normalized = normalizeCanonicalSymbol(symbol);
-
-  for (const quote of getSortedQuotes()) {
-    if (normalized.endsWith(quote)) {
-      const baseRaw = normalized.slice(0, -quote.length);
-      if (!baseRaw) return null;
-
-      const base = BASE_ALIASES[baseRaw] ?? baseRaw;
-      return { base, quote };
+  for (const q of QUOTE_ASSETS) {
+    if (s.endsWith(q) && s.length > q.length) {
+      const base = s.slice(0, -q.length);
+      return { base, quote: q };
     }
   }
   return null;
 };
 
-const applyQuoteRules = (
-  provider: string,
-  base: string,
-  quote: string,
-  overridesHit: boolean,
-  preferredQuote?: string,
-): { base: string; quote: string } | null => {
-  // If overridden, don't interfere
-  if (overridesHit) return { base, quote };
-
-  // If provider says quote unsupported, try fallback
-  const isUnsupported = PROVIDER_UNSUPPORTED_QUOTES[provider]?.includes(quote);
-
-  if (isUnsupported) {
-    // 1) Preferred quote (env-driven) has priority if given
-    if (preferredQuote) {
-      return { base, quote: preferredQuote.toUpperCase() };
-    }
-
-    // 2) Provider fallback map
-    const fb = PROVIDER_QUOTE_FALLBACKS[provider]?.[quote];
-    if (fb) return { base, quote: fb };
-
-    // 3) Otherwise skip
-    return null;
-  }
-
-  return { base, quote };
-};
-
-const toProviderSymbol = (provider: string, base: string, quote: string): string | null => {
-  switch (provider) {
-    case 'binance':
-    case 'bybit':
-    case 'mexc':
-      return `${base}${quote}`;
-
-    case 'okx':
-    case 'coinbase':
-    case 'kucoin':
-      return `${base}-${quote}`;
-
-    case 'kraken': {
-      const krakenBase = base === 'BTC' ? 'XBT' : base;
-      // Kraken WS usually uses XBT/USD
-      return `${krakenBase}/${quote}`;
-    }
-
-    case 'gateio':
-      return `${base}_${quote}`;
-
-    case 'bitfinex': {
-      // Bitfinex uses UST for USDT in some tickers (common normalization)
-      const bitfinexQuote = quote === 'USDT' ? 'UST' : quote;
-      return `t${base}${bitfinexQuote}`;
-    }
-
-    case 'bitstamp':
-      return `${base}${quote}`.toLowerCase();
-
-    default:
-      return `${base}${quote}`;
-  }
-};
-
-const toProviderInstId = (provider: string, base: string, quote: string): string | null => {
-  switch (provider) {
-    case 'kraken': {
-      // Kraken REST expects XBTUSD style pairs in many endpoints
-      const krakenBase = base === 'BTC' ? 'XBT' : base;
-      return `${krakenBase}${quote}`;
-    }
-    default:
-      return toProviderSymbol(provider, base, quote);
-  }
-};
-
+/**
+ * نگاشت سمبل canonical به provider-specific
+ * با در نظر گرفتن overrideها
+ */
 export const providerSymbolFromCanonical = (
   provider: string,
-  symbol: string,
-  overridesRaw?: string,          // env: MARKET_DATA_SYMBOL_OVERRIDES_<PROVIDER>
-  preferredQuoteRaw?: string,     // env: MARKET_DATA_PREFERRED_QUOTE_<PROVIDER>  (e.g. USD)
-): { providerSymbol: string; providerInstId: string } | null => {
-  const parts = splitCanonicalSymbol(symbol);
-  if (!parts) return null;
+  canonicalSymbol: string,
+  overrides?: string,
+): string | null => {
+  const overrideMap = parseOverrides(overrides);
+  const override = overrideMap[canonicalSymbol];
+  if (override) return override;
 
-  const providerKey = provider.toUpperCase();
-  const preferredQuoteValue =
-    preferredQuoteRaw ?? process.env[`MARKET_DATA_PREFERRED_QUOTE_${providerKey}`];
-  const overrides = (() => {
-    if (provider === 'brsapi_market') {
-      const primary =
-        overridesRaw ?? process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET;
-      const alias = process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI;
-      return {
-        ...parseOverrides(alias),
-        ...parseOverrides(primary),
-      };
-    }
-    const overridesValue =
-      overridesRaw ?? process.env[`MARKET_DATA_SYMBOL_OVERRIDES_${providerKey}`];
-    return parseOverrides(overridesValue);
-  })();
-  const canonical = normalizeCanonicalSymbol(symbol);
-  const overridden = overrides[canonical];
-
-  if (overridden) {
-    return { providerSymbol: overridden, providerInstId: overridden };
-  }
-
-  if (provider === 'navasan') {
-    return null;
-  }
-
-  if (provider === 'bonbast') {
-    return null;
-  }
-
-  if (provider === 'brsapi_market') {
-    const defaultMap: Record<string, string> = {
-      USDIRT: 'USD',
-      EURIRT: 'EUR',
-      AEDIRT: 'AED',
-      GBPIRT: 'GBP',
-      SEKKEHIRT: 'IR_COIN_EMAMI',
-      ABSHODEHIRT: 'IR_GOLD_MELTED',
-      GOLD18IRT: 'IR_GOLD_18K',
-      GOLD24IRT: 'IR_GOLD_24K',
-    };
-    const mapped = defaultMap[canonical];
-    if (!mapped) {
-      return null;
-    }
-    return { providerSymbol: mapped, providerInstId: mapped };
-  }
-
-  const ruled = applyQuoteRules(
-    provider,
-    parts.base,
-    parts.quote,
-    /* overridesHit */ false,
-    preferredQuoteValue,
-  );
+  const ruled = applyQuoteRules(canonicalSymbol);
   if (!ruled) return null;
 
+  // ⚙️ فیلتر مخصوص TwelveData برای جلوگیری از خراب شدن batch
   if (provider === 'twelvedata') {
-    const isEquity =
-      FIAT_ASSETS.has(ruled.quote) &&
-      !FIAT_ASSETS.has(ruled.base) &&
-      !COMMODITY_BASES.has(ruled.base);
-    const providerSymbol = isEquity ? ruled.base : `${ruled.base}/${ruled.quote}`;
-    return { providerSymbol, providerInstId: providerSymbol };
+    // ۱. فقط quoteهای فیات مجاز هستند
+    if (['IRT', 'IRR'].includes(ruled.quote)) return null;
+    if (['USDT', 'USDC'].includes(ruled.quote)) return null;
   }
 
-  const providerSymbol = toProviderSymbol(provider, ruled.base, ruled.quote);
-  const providerInstId = toProviderInstId(provider, ruled.base, ruled.quote);
-  if (!providerSymbol || !providerInstId) return null;
+  // 🔹 Provider-specific formats
+  switch (provider) {
+    case 'twelvedata':
+      // سهام یا شاخص‌ها بدون quote می‌آیند
+      if (isEquity(ruled)) return ruled.base;
+      return `${ruled.base}/${ruled.quote}`;
 
-  return { providerSymbol, providerInstId };
+    case 'navasan':
+      return ruled.base.toLowerCase();
+
+    case 'brsapi_market':
+      return ruled.base.toUpperCase();
+
+    case 'bonbast':
+      return ruled.base.toLowerCase();
+
+    case 'binance':
+    case 'okx':
+    case 'bybit':
+    case 'kraken':
+    case 'coinbase':
+      return `${ruled.base}${ruled.quote}`;
+
+    default:
+      return canonicalSymbol;
+  }
 };
 
-export const buildInstrumentFromSymbol = (symbol: string): Instrument | null => {
-  const normalized = normalizeCanonicalSymbol(symbol);
-  const parts = splitCanonicalSymbol(normalized);
-  if (!parts) return null;
+/**
+ * ساخت mapping برای همه providerها بر اساس overrides و symbol list
+ */
+export const mapSymbolsForProviders = (
+  providers: string[],
+  symbols: string[],
+  overridesByProvider: Record<string, string | undefined>,
+): InstrumentMapping[] => {
+  const result: InstrumentMapping[] = [];
 
-  const assetType = (() => {
-    if (normalized === 'XAUTUSDT' || normalized === 'PAXGUSDT') {
-      return 'GOLD';
-    }
-    if (parts.quote === 'IRT' || parts.quote === 'IRR') {
-      return 'IRAN';
-    }
-    if (COMMODITY_BASES.has(parts.base)) {
-      return 'COMMODITY';
-    }
-    if (FIAT_ASSETS.has(parts.base) && FIAT_ASSETS.has(parts.quote)) {
-      return 'FOREX';
-    }
-    if (FIAT_ASSETS.has(parts.quote) && !FIAT_ASSETS.has(parts.base)) {
-      return 'EQUITY';
-    }
-    return 'CRYPTO';
-  })();
+  for (const provider of providers) {
+    const overrides = overridesByProvider[provider];
+    for (const canonicalSymbol of symbols) {
+      const providerSymbol = providerSymbolFromCanonical(provider, canonicalSymbol, overrides);
+      if (!providerSymbol) continue;
 
-  return {
-    id: `${parts.base.toLowerCase()}-${parts.quote.toLowerCase()}`,
-    assetType,
-    base: parts.base,
-    quote: parts.quote,
-    canonicalSymbol: normalized,
-    isActive: true,
-  };
+      result.push({
+        canonicalSymbol,
+        provider,
+        providerInstId: providerSymbol,
+      });
+    }
+  }
+
+  return result;
 };
