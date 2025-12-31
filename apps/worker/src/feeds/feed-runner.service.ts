@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { normalizeCanonicalSymbol, providerSymbolFromCanonical } from '@libs/market-data';
+import { InstrumentMapping, normalizeCanonicalSymbol, providerSymbolFromCanonical } from '@libs/market-data';
 
-import { TelegramService } from '../telegram/telegram.service';
+import { TelegramPublisherService } from '../telegram/telegram-publisher.service';
 import { MarketDataCacheService } from '../market-data-v3/market-data-cache.service';
-import { PricesFormatter } from './formatters/prices.formatter';
-import { NewsFormatter } from './formatters/news.formatter';
+import { formatPricesFeedMessage } from './formatters/prices.formatter';
+import { formatNewsFeedMessage } from './formatters/news.formatter';
 import { FeedConfigService } from './feed-config.service';
 
 type FeedType = 'prices' | 'news';
@@ -16,10 +16,8 @@ export class FeedRunnerService {
 
   constructor(
     private readonly feedConfig: FeedConfigService,
-    private readonly telegram: TelegramService,
+    private readonly telegram: TelegramPublisherService,
     private readonly marketDataCache: MarketDataCacheService,
-    private readonly pricesFormatter: PricesFormatter,
-    private readonly newsFormatter: NewsFormatter,
   ) {}
 
   async runFeed(feedId: string, type: FeedType): Promise<void> {
@@ -48,7 +46,7 @@ export class FeedRunnerService {
 
   private async runPricesFeed(feedId: string, runId: string): Promise<void> {
     const cfg = this.feedConfig.getPricesFeedConfig(feedId);
-    const { providers, symbols, destinations, format, includeTimestamp, title, maxProvidersPerSymbol } = cfg;
+    const { providers, symbols, destinations, format, includeTimestamp } = cfg;
 
     const providerTickers = new Map<string, any[]>();
 
@@ -85,21 +83,15 @@ export class FeedRunnerService {
       providerTickers,
     });
 
-    const message = this.pricesFormatter.formatPricesFeedMessage({
+    const message = formatPricesFeedMessage({
       aggregations,
       format,
       includeTimestamp,
       timestamp: Date.now(),
-      title,
-      maxProvidersPerSymbol,
     });
 
     await Promise.all(
-      destinations.map((destination) =>
-        this.telegram.sendMessage(destination, message, {
-          disable_web_page_preview: true,
-        }),
-      ),
+      destinations.map((destination) => this.telegram.sendMessage(destination, message)),
     );
 
     this.logger.log(
@@ -115,24 +107,19 @@ export class FeedRunnerService {
 
   private async runNewsFeed(feedId: string, runId: string): Promise<void> {
     const cfg = this.feedConfig.getNewsFeedConfig(feedId);
-    const { providers, destinations, title } = cfg;
+    const { providers, destinations, maxItems, includeTags } = cfg;
 
-    const items = await this.marketDataCache.fetchNews({ providers });
+    const items = await this.marketDataCache.fetchNews({ providers, maxItems });
 
     if (!items.length) return;
 
-    const message = this.newsFormatter.formatNewsFeedMessage({
+    const message = formatNewsFeedMessage({
       items,
-      title,
-      timestamp: Date.now(),
+      includeTags,
     });
 
     await Promise.all(
-      destinations.map((destination) =>
-        this.telegram.sendMessage(destination, message, {
-          disable_web_page_preview: true,
-        }),
-      ),
+      destinations.map((destination) => this.telegram.sendMessage(destination, message)),
     );
 
     this.logger.log(
@@ -146,7 +133,7 @@ export class FeedRunnerService {
     );
   }
 
-  private buildMappings(provider: string, symbols: string[]) {
+  private buildMappings(provider: string, symbols: string[]): InstrumentMapping[] {
     return symbols
       .map((symbol) => {
         const canonicalSymbol = normalizeCanonicalSymbol(symbol);
@@ -163,9 +150,9 @@ export class FeedRunnerService {
           );
           return null;
         }
-        return { canonicalSymbol, providerSymbol: mapping };
+        return mapping;
       })
-      .filter((x): x is { canonicalSymbol: string; providerSymbol: string } => !!x);
+      .filter((x): x is InstrumentMapping => !!x);
   }
 
   private async fetchInBatches<T>(params: {

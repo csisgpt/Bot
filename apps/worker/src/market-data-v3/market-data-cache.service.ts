@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RedisService } from '@libs/core';
+import { PrismaService, RedisService } from '@libs/core';
+import { InstrumentMapping, ProviderRegistryService, Ticker } from '@libs/market-data';
 
 export interface CachedTicker {
   provider: string;
@@ -13,11 +14,14 @@ export interface CachedTicker {
 
 @Injectable()
 export class MarketDataCacheService {
+  private readonly logger = new Logger(MarketDataCacheService.name);
   private readonly ttlSeconds: number;
 
   constructor(
     private readonly redisService: RedisService,
     private readonly configService: ConfigService,
+    private readonly prismaService: PrismaService,
+    private readonly providerRegistry: ProviderRegistryService,
   ) {
     this.ttlSeconds = this.configService.get<number>('MARKET_DATA_TICKER_TTL_SECONDS', 120);
   }
@@ -61,6 +65,84 @@ export class MarketDataCacheService {
     return entries;
   }
 
+  async getTickersCached(params: {
+    provider: string;
+    symbols: string[];
+  }): Promise<CachedTicker[]> {
+    const { provider, symbols } = params;
+    const entries = await this.getTickers(provider, symbols);
+    return Array.from(entries.values());
+  }
+
+  async warmCache(params: { provider: string; instruments: InstrumentMapping[] }): Promise<void> {
+    const { provider, instruments } = params;
+    if (!instruments.length) return;
+    const instance = this.providerRegistry.getProviderByName(provider);
+    if (!instance) {
+      this.logger.warn(
+        JSON.stringify({ event: 'cache_warm_provider_missing', provider }),
+      );
+      return;
+    }
+    try {
+      const tickers = await instance.fetchTickers(instruments);
+      await Promise.all(
+        tickers.map((ticker) =>
+          this.setTicker(ticker.provider, ticker.canonicalSymbol, this.toCachedTicker(ticker)),
+        ),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(
+        JSON.stringify({ event: 'cache_warm_failed', provider, message }),
+      );
+    }
+  }
+
+  aggregateBestPrices(params: {
+    symbols: string[];
+    providerTickers: Map<string, CachedTicker[]>;
+  }): Array<{ symbol: string; entries: Array<{ provider: string; price: number }>; spreadPct?: number | null }> {
+    const { symbols, providerTickers } = params;
+    return symbols.map((symbol) => {
+      const normalized = this.normalizeSymbol(symbol);
+      const entries: Array<{ provider: string; price: number }> = [];
+      for (const [provider, tickers] of providerTickers.entries()) {
+        const match = tickers.find(
+          (ticker) => this.normalizeSymbol(ticker.symbol) === normalized,
+        );
+        if (!match) continue;
+        const price = this.resolvePrice(match);
+        if (price === null) continue;
+        entries.push({ provider, price });
+      }
+      let spreadPct: number | null = null;
+      if (entries.length > 1) {
+        const prices = entries.map((entry) => entry.price);
+        const min = Math.min(...prices);
+        const max = Math.max(...prices);
+        spreadPct = min > 0 ? ((max - min) / min) * 100 : null;
+      }
+      return { symbol: normalized, entries, spreadPct };
+    });
+  }
+
+  async fetchNews(params: { providers: string[]; maxItems?: number }): Promise<Array<{ title: string; url: string; provider: string; tags?: string[] }>> {
+    const { providers, maxItems = 10 } = params;
+    if (!providers.length) return [];
+    const items = await this.prismaService.news.findMany({
+      where: { provider: { in: providers } },
+      orderBy: { ts: 'desc' },
+      take: maxItems,
+    });
+    return items.map((item) => ({
+      title: item.title,
+      url: item.url,
+      provider: item.provider,
+      tags: item.tags ?? [],
+    }));
+  }
+
   async getBestAcrossProviders(
     symbol: string,
     providers: string[],
@@ -92,5 +174,30 @@ export class MarketDataCacheService {
 
   private normalizeSymbol(symbol: string): string {
     return symbol.trim().toUpperCase();
+  }
+
+  private resolvePrice(ticker: CachedTicker): number | null {
+    if (Number.isFinite(ticker.last ?? NaN)) {
+      return ticker.last as number;
+    }
+    const bid = ticker.bid ?? null;
+    const ask = ticker.ask ?? null;
+    if (Number.isFinite(bid ?? NaN) && Number.isFinite(ask ?? NaN)) {
+      return ((bid as number) + (ask as number)) / 2;
+    }
+    if (Number.isFinite(bid ?? NaN)) return bid as number;
+    if (Number.isFinite(ask ?? NaN)) return ask as number;
+    return null;
+  }
+
+  private toCachedTicker(ticker: Ticker): CachedTicker {
+    return {
+      provider: ticker.provider,
+      symbol: ticker.canonicalSymbol,
+      bid: ticker.bid ?? null,
+      ask: ticker.ask ?? null,
+      last: ticker.last ?? null,
+      ts: ticker.ts,
+    };
   }
 }
