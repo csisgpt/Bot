@@ -1,4 +1,4 @@
-import { AssetType, Instrument, InstrumentMapping, MarketType } from './models';
+import { Instrument, InstrumentMapping, MarketType } from './models';
 
 /**
  * Canonical symbol conventions used across the project:
@@ -116,29 +116,29 @@ export const prettySymbol = (symbol: string): string => {
   return `${parsed.base}/${parsed.quote}`;
 };
 
-const inferAssetType = (base: string, quote: string): AssetType => {
+const inferAssetType = (base: string, quote: string): Instrument['assetType'] => {
   const b = base.toUpperCase();
   const q = quote.toUpperCase();
 
-  if (b === 'XAU' || b === 'XAG' || b === 'XAUT' || b === 'PAXG') return 'commodity';
-  if (q === 'IRT' || q === 'IRR') return 'fx';
+  if (b === 'XAU' || b === 'XAG' || b === 'XAUT' || b === 'PAXG') return 'GOLD';
+  if (q === 'IRT' || q === 'IRR') return 'FX';
 
   // Likely crypto if it looks like a crypto quote/base.
-  if (['USDT', 'USDC', 'BTC', 'ETH'].includes(q)) return 'crypto';
+  if (['USDT', 'USDC', 'BTC', 'ETH'].includes(q)) return 'CRYPTO';
   if (['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'TRX', 'BNB', 'AVAX', 'DOT', 'MATIC'].includes(b)) {
-    return q ? 'crypto' : 'crypto';
+    return 'CRYPTO';
   }
 
   // ETFs we explicitly track.
-  if (ETF_SYMBOLS.has(b)) return 'etf';
+  if (ETF_SYMBOLS.has(b)) return 'ETF';
 
   // Forex pairs typically have 3-letter base/quote.
-  if (b.length === 3 && q.length === 3) return 'fx';
+  if (b.length === 3 && q.length === 3) return 'FX';
 
   // Equities: common pattern BASE+USD, BASE+EUR...
-  if (q && ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'SEK'].includes(q)) return 'equity';
+  if (q && ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'SEK'].includes(q)) return 'EQUITY';
 
-  return 'unknown';
+  return 'UNKNOWN';
 };
 
 const inferMarketType = (_base: string, _quote: string): MarketType => {
@@ -245,16 +245,13 @@ export const buildInstrumentFromSymbol = (
   const base = parts.base;
   const quote = parts.quote;
   const assetType = inferAssetType(base, quote);
-  const marketType = inferMarketType(base, quote);
 
   return {
     id: `${provider}:${normalized}`,
-    provider,
     canonicalSymbol: normalized,
     base,
     quote,
     assetType,
-    marketType,
     isActive: true,
   };
 };

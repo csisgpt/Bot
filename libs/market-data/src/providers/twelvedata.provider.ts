@@ -1,25 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
-import WebSocket from 'ws';
+import * as WebSocket from 'ws';
 
-import { Candle } from '../models';
-import { InstrumentMapping, MarketDataProvider } from '../provider.types';
-import { retry } from '../utils/retry';
+import { Candle, InstrumentMapping, Ticker } from '../models';
+import { MarketDataProvider } from '../interfaces';
+import { retry } from '../utils/retry.util';
 import { BaseWsProvider } from './base-ws.provider';
 
-export type Ticker = {
-  symbol: string; // canonical
-  price: number;
-  timestamp: number;
-  provider: string;
-};
-
 @Injectable()
-export class TwelveDataProvider extends BaseWsProvider implements MarketDataProvider {
-  readonly provider = 'twelvedata' as const;
+export class TwelveDataMarketDataProvider extends BaseWsProvider implements MarketDataProvider {
+  supportsWebsocket = true;
 
-  private readonly logger = new Logger(TwelveDataProvider.name);
   private readonly restClient: AxiosInstance;
 
   private readonly apiKey: string;
@@ -36,11 +28,12 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
   private appHeartbeatTimer?: NodeJS.Timeout;
 
   constructor(private readonly config: ConfigService) {
-    super({
-      provider: 'twelvedata',
-      url:
-        (config.get<string>('TWELVEDATA_WS_URL') ?? config.get<string>('TWELVEDATA_WS_URL')) ||
-        'wss://ws.twelvedata.com/v1/quotes/price',
+    const wsUrl =
+      config.get<string>('TWELVEDATA_WS_URL') ??
+      config.get<string>('TWELVE_DATA_WS_URL') ??
+      'wss://ws.twelvedata.com/v1/quotes/price';
+    super('twelvedata', {
+      url: wsUrl,
       // NOTE: TwelveData may close the connection when it sees unknown actions.
       // We rely on the WS library / underlying ping-pong.
       heartbeatMs: 0,
@@ -53,7 +46,7 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
       '';
 
     this.restUrl = this.config.get<string>('TWELVEDATA_REST_URL') ?? 'https://api.twelvedata.com';
-    this.wsUrl = this.config.get<string>('TWELVEDATA_WS_URL') ?? 'wss://ws.twelvedata.com/v1/quotes/price';
+    this.wsUrl = wsUrl;
 
     this.maxSymbolsPerRequest = Number(this.config.get<string>('TWELVEDATA_MAX_SYMBOLS_PER_REQUEST') ?? 20);
     this.timeoutMs = Number(this.config.get<string>('TWELVEDATA_TIMEOUT_MS') ?? 15000);
@@ -68,6 +61,17 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
 
   setTickersUniverse(instruments: InstrumentMapping[]): void {
     this.tickerMappings = new Map(instruments.map((m) => [m.providerSymbol.toUpperCase(), m]));
+  }
+
+  async subscribeTickers(instruments: InstrumentMapping[]): Promise<void> {
+    this.setTickersUniverse(instruments);
+    if (this.connected) {
+      this.sendSubscribe();
+    }
+  }
+
+  async subscribeCandles(_instruments: InstrumentMapping[], _timeframes: string[]): Promise<void> {
+    // TwelveData websocket candle streaming is not enabled in this provider.
   }
 
   /**
@@ -105,16 +109,6 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
         {
           attempts: this.retryAttempts,
           baseDelayMs: this.retryBaseDelayMs,
-          onRetry: (err, attempt) => {
-            this.logger.warn(
-              JSON.stringify({
-                event: 'twelvedata_fetch_tickers_retry',
-                provider: this.provider,
-                attempt,
-                message: err?.message,
-              }),
-            );
-          },
         },
       );
 
@@ -126,10 +120,12 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
         if (!mapping) continue;
 
         results.push({
-          symbol: mapping.canonicalSymbol,
-          price: row.price,
-          timestamp: row.ts,
           provider: this.provider,
+          canonicalSymbol: mapping.canonicalSymbol,
+          ts: row.ts,
+          last: row.price,
+          bid: row.price,
+          ask: row.price,
         });
       }
     }
@@ -140,19 +136,13 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
   /**
    * Fetch candles (still uses /time_series — single-symbol per request).
    */
-  async fetchCandles(params: {
-    instrument: InstrumentMapping;
-    interval: string;
-    limit: number;
-  }): Promise<Candle[]> {
-    const { instrument, interval, limit } = params;
-
+  async fetchCandles(instrument: InstrumentMapping, timeframe: string, limit: number): Promise<Candle[]> {
     const response = await retry(
       () =>
         this.restClient.get('/time_series', {
           params: {
             symbol: instrument.providerSymbol,
-            interval: this.mapInterval(interval),
+            interval: this.mapInterval(timeframe),
             outputsize: limit,
             apikey: this.apiKey,
           },
@@ -160,32 +150,15 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
       {
         attempts: this.retryAttempts,
         baseDelayMs: this.retryBaseDelayMs,
-        onRetry: (err, attempt) => {
-          this.logger.warn(
-            JSON.stringify({
-              event: 'twelvedata_fetch_candles_retry',
-              provider: this.provider,
-              attempt,
-              message: err?.message,
-            }),
-          );
-        },
       },
     );
 
-    return this.parseTimeSeriesResponse(response.data, instrument.canonicalSymbol);
+    return this.parseTimeSeriesResponse(response.data, instrument, timeframe);
   }
 
   // ---- WS ----
 
-  connect(): void {
-    // BaseWsProvider will call `createWsUrl()` for url. We already include apikey in the URL.
-    super.connect();
-  }
-
-  protected createWsUrl(): string {
-    // TwelveData expects api key either in query or via header.
-    // We keep it in query for simplicity.
+  protected buildUrl(): string {
     const sep = this.wsUrl.includes('?') ? '&' : '?';
     return `${this.wsUrl}${sep}apikey=${encodeURIComponent(this.apiKey)}`;
   }
@@ -232,13 +205,17 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
     const price = this.parseNumber(priceRaw);
     if (price === null) return;
 
-    const ts = this.normalizeTimestamp(msg?.timestamp ?? msg?.data?.timestamp ?? msg?.time ?? msg?.data?.time);
+    const ts =
+      this.normalizeTimestamp(msg?.timestamp ?? msg?.data?.timestamp ?? msg?.time ?? msg?.data?.time) ??
+      Date.now();
 
     this.emitTicker({
-      symbol: mapping.canonicalSymbol,
-      price,
-      timestamp: ts,
       provider: this.provider,
+      canonicalSymbol: mapping.canonicalSymbol,
+      ts,
+      last: price,
+      bid: price,
+      ask: price,
     });
   }
 
@@ -271,6 +248,14 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
       clearInterval(this.appHeartbeatTimer);
       this.appHeartbeatTimer = undefined;
     }
+  }
+
+  private sendJson(payload: unknown): void {
+    this.send(payload);
+  }
+
+  private emitTicker(ticker: Ticker): void {
+    this.emit('ticker', ticker);
   }
 
   private parseQuoteResponse(
@@ -329,7 +314,7 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
     return out;
   }
 
-  private parseTimeSeriesResponse(data: any, canonicalSymbol: string): Candle[] {
+  private parseTimeSeriesResponse(data: any, instrument: InstrumentMapping, timeframe: string): Candle[] {
     if (!data || typeof data !== 'object') return [];
 
     if (data.status === 'error') {
@@ -339,41 +324,47 @@ export class TwelveDataProvider extends BaseWsProvider implements MarketDataProv
           provider: this.provider,
           code: data.code,
           message: data.message,
-          symbol: canonicalSymbol,
+          symbol: instrument.canonicalSymbol,
         }),
       );
       return [];
     }
 
-    const values = Array.isArray(data.values) ? data.values : [];
+    const values = Array.isArray(data.values) ? (data.values as Array<Record<string, unknown>>) : [];
     return values
-      .map((v: any) => this.parseTimeSeriesValue(v, canonicalSymbol))
-      .filter((x): x is Candle => !!x)
-      .sort((a, b) => a.timestamp - b.timestamp);
+      .map((v) => this.parseTimeSeriesValue(v, instrument, timeframe))
+      .filter((x): x is Candle => x !== null)
+      .sort((a: Candle, b: Candle) => a.openTime - b.openTime);
   }
 
-  private parseTimeSeriesValue(v: any, canonicalSymbol: string): Candle | null {
-    const ts = this.normalizeTimestamp(v?.datetime);
+  private parseTimeSeriesValue(
+    v: Record<string, unknown>,
+    instrument: InstrumentMapping,
+    timeframe: string,
+  ): Candle | null {
+    const ts = this.normalizeTimestamp(v?.['datetime']);
     if (!ts) return null;
 
-    const open = this.parseNumber(v?.open);
-    const high = this.parseNumber(v?.high);
-    const low = this.parseNumber(v?.low);
-    const close = this.parseNumber(v?.close);
+    const open = this.parseNumber(v?.['open']);
+    const high = this.parseNumber(v?.['high']);
+    const low = this.parseNumber(v?.['low']);
+    const close = this.parseNumber(v?.['close']);
 
     if ([open, high, low, close].some((x) => x === null)) return null;
 
-    const volume = this.parseNumber(v?.volume) ?? 0;
+    const volume = this.parseNumber(v?.['volume']) ?? 0;
 
     return {
-      symbol: canonicalSymbol,
-      interval: '1m',
-      timestamp: ts,
+      provider: this.provider,
+      canonicalSymbol: instrument.canonicalSymbol,
+      timeframe,
+      openTime: ts,
       open: open!,
       high: high!,
       low: low!,
       close: close!,
       volume,
+      isFinal: true,
     };
   }
 
