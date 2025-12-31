@@ -59,8 +59,64 @@ const formatPrice = (value: number): string =>
     maximumFractionDigits: 6,
   }).format(value);
 
+// NOTE: قبلی را نگه می‌داریم (fallback)
 const formatTimestamp = (timestamp: number): string =>
   new Date(timestamp).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+
+/**
+ * تایم‌استمپ فارسی (ترجیحاً شمسی/جلالی) با کنترل کامل روی خروجی.
+ * - TimeZone: FEED_TIMESTAMP_TZ || APP_TIMEZONE || 'UTC'
+ * - Numerals: پیش‌فرض اعداد فارسی؛ اگر خواستی لاتین: FEED_TIMESTAMP_NUMERALS=latn
+ * - Fallback: اگر Intl/ICU یا timezone مشکل داشت، می‌افتد به formatTimestamp قبلی
+ */
+const resolveTimestampTimeZone = (): string =>
+  (process.env.FEED_TIMESTAMP_TZ ?? process.env.APP_TIMEZONE ?? 'UTC').trim() || 'UTC';
+
+const resolveTimestampNumerals = (): 'native' | 'latn' =>
+  (process.env.FEED_TIMESTAMP_NUMERALS ?? 'native').toLowerCase() === 'latn' ? 'latn' : 'native';
+
+const buildFaLocale = (): string => {
+  // fa-IR with Persian calendar; numerals configurable
+  const numerals = resolveTimestampNumerals();
+  const base = 'fa-IR-u-ca-persian';
+  return numerals === 'latn' ? `${base}-nu-latn` : base;
+};
+
+const formatTimestampFa = (timestamp: number): string => {
+  const timeZone = resolveTimestampTimeZone();
+  const locale = buildFaLocale();
+
+  try {
+    const dtf = new Intl.DateTimeFormat(locale, {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+
+    const parts = dtf.formatToParts(new Date(timestamp));
+    const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
+
+    const y = pick('year');
+    const m = pick('month');
+    const d = pick('day');
+    const hh = pick('hour');
+    const mm = pick('minute');
+    const ss = pick('second');
+
+    const date = [y, m, d].filter(Boolean).join('/');
+    const time = [hh, mm, ss].filter(Boolean).join(':');
+
+    // خروجی کوتاه و تمیز برای هدر
+    return `${date} ${time}`;
+  } catch {
+    return formatTimestamp(timestamp);
+  }
+};
 
 /**
  * اگر symbol به شکل BTCUSDT باشد، به BTC/USDT تبدیل می‌کند (برای خوانایی).
@@ -179,7 +235,7 @@ export const formatPricesFeedMessage = (params: {
 
   const header: string[] = [];
   header.push(`🧭 <b>Best Prices</b>  <i>Snapshot</i>`);
-  if (includeTimestamp) header.push(`🕒 <code>${escapeHtml(formatTimestamp(timestamp))}</code>`);
+  if (includeTimestamp) header.push(`🕒 <code>${escapeHtml(formatTimestampFa(timestamp))}</code>`);
   header.push(divider);
 
   const groups: Record<SectionKey, string[]> = {
