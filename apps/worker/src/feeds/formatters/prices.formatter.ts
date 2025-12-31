@@ -171,16 +171,19 @@ export const formatPricesFeedMessage = (params: {
 }): string => {
   const { aggregations, format, includeTimestamp, timestamp = Date.now() } = params;
 
+  // NOTE: format فعلاً صرفاً برای سازگاری ورودی نگه داشته شده.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _formatCompat = format;
+
   const header: string[] = [];
-  header.push('🧭 <b>چنده؟</b>  <i>Price Snapshot</i>');
+  header.push('🧭 <b>چنده؟</b>  <i>Best Price</i>');
   if (includeTimestamp) header.push(`🕒 <i>${formatTimestamp(timestamp)}</i>`);
   header.push(divider);
 
-  const blocks: string[] = [];
+  const lines: string[] = [];
 
   for (const ag of aggregations) {
-    const symbol = escapeHtml(prettySymbol(ag.symbol));
-    const iranSymbol = isIranSymbol(ag.symbol);
+    const iran = isIranSymbol(ag.symbol);
 
     const entries = (ag.entries ?? [])
       .filter((e) => isFiniteNumber(e.price))
@@ -192,80 +195,44 @@ export const formatPricesFeedMessage = (params: {
       .sort((a, b) => a.price - b.price);
 
     if (entries.length === 0) {
-      blocks.push(
-        [
-          `🔹 <b>${symbol}</b>`,
-          `⚠️ <i>هیچ قیمتی از پرووایدرها نرسید</i>`,
-        ].join('\n'),
-      );
-      blocks.push(divider);
+      const name = iran ? escapeHtml(getIranLabel(ag.symbol)) : escapeHtml(prettySymbol(ag.symbol));
+      lines.push(`⚠️ ${name} — <b>N/A</b>`);
       continue;
     }
 
-    const low = entries[0];
-    const high = entries[entries.length - 1];
-    const best = low; // پایین‌ترین قیمت به‌عنوان Best (می‌تونی اگر خواستی “میانه/میانگین” بذاری)
-
+    const best = entries[0];
     const bestP = providerDisplay(best.provider);
-    const rangeText =
-      entries.length >= 2
-        ? `↕️ <i>Range</i>: <code>${formatPrice(low.price)}</code> تا <code>${formatPrice(
-            high.price,
-          )}</code>`
-        : `↕️ <i>Range</i>: <code>${formatPrice(best.price)}</code>`;
 
-    const spreadText = `📊 <i>Spread</i>: ${spreadBadge(ag.spreadPct)}  <i>(${formatSpread(
-      ag.spreadPct,
-    )})</i>`;
-
-    // فهرست پرووایدرها (بدون حس جدول)
-    const formatEntryPrice = iranSymbol ? (value: number) => formatIranNumber(value) : formatPrice;
-    const providerLines =
-      format === 'compact'
-        ? // compact: حداکثر 3 مورد (بهترین + چندتا از بقیه)
-          entries
-            .slice(0, Math.min(3, entries.length))
-            .map((e, idx) => {
-              const p = providerDisplay(e.provider);
-              const tag = idx === 0 ? '🏷️ <i>Best</i>' : '•';
-              return `${tag} ${p.emoji} <b>${p.text}</b> — <code>${formatEntryPrice(e.price)}</code>`;
-            })
-        : // "table" => detailed ولی غیرجدولی
-          entries.map((e, idx) => {
-            const p = providerDisplay(e.provider);
-            const isBest = idx === 0;
-            const bullet = isBest ? '🏷️ <i>Best</i>' : '•';
-            return `${bullet} ${p.emoji} <b>${p.text}</b> — <code>${formatEntryPrice(e.price)}</code>`;
-          });
-
-    const block: string[] = [];
-    block.push(`🔹 <b>${symbol}</b>`);
-    if (iranSymbol) {
+    if (iran) {
       const label = escapeHtml(getIranLabel(ag.symbol));
       const extraUnit = getIranExtraUnit(ag.symbol);
-      const extraSuffix = extraUnit ? ` — <i>هر</i> ${escapeHtml(extraUnit)}` : '';
-      const priceText = formatIranPrice(best.price, ag.symbol);
-      block.push(`🇮🇷 <b>${label}</b>`);
-      block.push(
-        `💵 <i>Price</i>: <code>${priceText.primaryText}</code>${priceText.secondaryText ? `  <i>(${priceText.secondaryText})</i>` : ''}${extraSuffix}`,
-      );
-    } else {
-      block.push(
-        `💰 <i>Best</i>: <code>${formatPrice(best.price)}</code>  <i>via</i> ${bestP.emoji} <b>${bestP.text}</b>`,
-      );
-      block.push(rangeText);
-      block.push(spreadText);
-    }
-    block.push(''); // فاصله نرم
-    block.push('🧩 <i>Providers</i>');
-    block.push(...providerLines);
+      const extraSuffix = extraUnit ? ` <i>(هر ${escapeHtml(extraUnit)})</i>` : '';
 
-    blocks.push(block.join('\n'));
-    blocks.push(divider);
+      const priceText = formatIranPrice(best.price, ag.symbol);
+      const primary = escapeHtml(priceText.primaryText);
+      const secondary = priceText.secondaryText ? escapeHtml(priceText.secondaryText) : null;
+
+      lines.push(
+        `🇮🇷 ${label} — <b>${primary}</b>${secondary ? `  <i>(${secondary})</i>` : ''}${extraSuffix}`,
+      );
+      continue;
+    }
+
+    const symbol = escapeHtml(prettySymbol(ag.symbol));
+    const price = escapeHtml(formatPrice(best.price));
+
+    // NOTE: اگر نمی‌خوای سورس/پرووایدر نمایش داده بشه، این بخش رو کامنت کن:
+    const source = ` <i>(${bestP.emoji} ${bestP.text})</i>`;
+
+    lines.push(`🔹 ${symbol} — <b>${price}</b>${source}`);
+
+    // NOTE: جزئیات قبلی مثل Range/Spread/Providers حذف نشدن، فقط دیگه نمایش داده نمی‌شن:
+    // const low = entries[0];
+    // const high = entries[entries.length - 1];
+    // const rangeText = entries.length >= 2 ? ... : ...;
+    // const spreadText = ... spreadBadge(ag.spreadPct) ...
+    // const providerLines = ...
   }
 
-  // حذف divider اضافه‌ی آخر
-  if (blocks.length && blocks[blocks.length - 1] === divider) blocks.pop();
-
-  return cleanLines([...header, ...blocks]);
+  return cleanLines([...header, ...lines]);
 };
