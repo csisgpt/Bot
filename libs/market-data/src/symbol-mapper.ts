@@ -1,200 +1,244 @@
-import { Instrument } from './models';
+import { Instrument, InstrumentMapping } from './models';
 
-const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'];
+/**
+ * Canonical symbol format used across the project.
+ *
+ * - Crypto/FX: BTCUSDT, EURUSD
+ * - Metals:    XAUUSD, XAUTUSDT, PAXGUSDT
+ * - Iran:      USDIRT, GOLD18IRT
+ */
+
+// Order matters: longer suffixes first so we correctly parse e.g. USDC before USD.
+const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH', 'IRT', 'IRR'] as const;
+const QUOTE_ASSETS_SORTED = [...QUOTE_ASSETS].sort((a, b) => b.length - a.length);
+
 const BASE_ALIASES: Record<string, string> = {
   XBT: 'BTC',
   XETH: 'ETH',
 };
 
-// Quotes that we treat as fiat for some providers (and TwelveData forex format BASE/QUOTE).
-const FIAT_ASSETS = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'CHF', 'AUD', 'NZD']);
-
-// Commodity bases supported in common data providers (TwelveData uses BASE/QUOTE for these too)
-const COMMODITY_BASES = new Set(['XAU', 'XAG', 'XPT', 'XPD']);
-
-// TwelveData might provide some crypto as BASE/QUOTE (typically against USD/EUR),
-// but NOT as stablecoin quotes like USDT/USDC. Keeping this explicit prevents
-// accidental subscriptions like BTC/USDT that can lead to disconnects / empty results.
-const TWELVEDATA_CRYPTO_BASES = new Set([
-  'BTC',
-  'ETH',
-  'SOL',
-  'XRP',
-  'ADA',
-  'DOGE',
-  'TRX',
-  'BNB',
-  'XAUT',
-]);
-
 const PROVIDER_UNSUPPORTED_QUOTES: Record<string, string[]> = {
-  // Coinbase عملاً روی USDT برای همه جفت‌ها قابل اتکا نیست
-  // (بسته به بازارها). بهتره پیش‌فرض USDT رو skip کنیم مگر override داده باشی.
+  // Coinbase: USDT markets are inconsistent; treat as unsupported by default.
   coinbase: ['USDT'],
-  // Kraken هم USDT محدود/متفاوت است؛ اگر می‌خوای سخت‌گیر باشی:
   // kraken: ['USDT'],
 };
 
-const parseOverrides = (raw?: string): Record<string, string> => {
-  // format: "BTCUSDT:BTC-USDT,ETHUSDT:ETH-USDT"
-  const map: Record<string, string> = {};
-  if (!raw) return map;
-  raw
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .forEach((pair) => {
-      const [k, v] = pair.split(':').map((x) => x.trim());
-      if (k && v) map[k.toUpperCase()] = v;
-    });
-  return map;
-};
-
-const applyProviderQuoteRules = (
-  provider: string,
-  parts: { base: string; quote: string },
-): { base: string; quote: string } => {
-  const unsupported = PROVIDER_UNSUPPORTED_QUOTES[provider] ?? [];
-  if (unsupported.includes(parts.quote)) {
-    // If quote unsupported by provider, return as-is; caller can decide to skip or override.
-    return parts;
+export const splitCanonicalSymbol = (canonicalSymbol: string): { base: string; quote: string } => {
+  const cleaned = cleanupSymbol(canonicalSymbol);
+  // best-effort suffix matching
+  for (const quote of QUOTE_ASSETS_SORTED) {
+    if (cleaned.endsWith(quote)) {
+      return { base: cleaned.slice(0, -quote.length), quote };
+    }
   }
-  return parts;
+  // fallback (unknown quote)
+  return { base: cleaned, quote: '' };
 };
 
-const splitCanonical = (canonicalSymbol: string): { base: string; quote: string } | null => {
-  const sym = canonicalSymbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  for (const q of QUOTE_ASSETS) {
-    if (sym.endsWith(q)) {
-      const base = sym.slice(0, sym.length - q.length);
-      if (!base) return null;
-      return { base, quote: q };
+/**
+ * Normalize canonical-ish symbols.
+ *
+ * Overloads:
+ * - normalizeCanonicalSymbol(symbol) => string (never null)
+ * - normalizeCanonicalSymbol(provider, providerSymbol) => string | null
+ */
+export function normalizeCanonicalSymbol(symbol: string): string;
+export function normalizeCanonicalSymbol(provider: string, symbol: string): string | null;
+export function normalizeCanonicalSymbol(a: string, b?: string): string | null {
+  // 1-arg call: treat input as canonical already
+  if (b === undefined) {
+    return cleanupSymbol(a);
+  }
+
+  const provider = String(a ?? '').toLowerCase();
+  const raw = String(b ?? '');
+  if (!raw) return null;
+
+  // If caller already gave us something like "EUR/USD" or "BTC-USDT"
+  // we parse it directly.
+  const direct = parseDelimitedPair(raw);
+  if (direct) {
+    const base = normalizeAssetCode(provider, direct.base);
+    const quote = normalizeAssetCode(provider, direct.quote);
+    return base && quote ? `${base}${quote}` : null;
+  }
+
+  // Provider-specific parsing
+  if (provider === 'kraken') {
+    const maybe = normalizeKrakenPair(raw);
+    if (maybe) return maybe;
+  }
+
+  // Generic suffix-based parsing (BTCUSDT, XAUTUSDT, USDIRT, ...)
+  const cleaned = cleanupSymbol(raw);
+  const pair = parseSuffixPair(cleaned);
+  if (!pair) return null;
+
+  const base = normalizeAssetCode(provider, pair.base);
+  const quote = normalizeAssetCode(provider, pair.quote);
+  return base && quote ? `${base}${quote}` : null;
+}
+
+/**
+ * Given a provider and a canonical symbol, produce providerSymbol/providerInstId.
+ * Supports per-provider overrides.
+ */
+export const providerSymbolFromCanonical = (params: {
+  provider: string;
+  canonicalSymbol: string;
+  overrides?: Record<string, string>;
+}): InstrumentMapping => {
+  const { provider, canonicalSymbol, overrides } = params;
+  const normalized = normalizeCanonicalSymbol(canonicalSymbol);
+  const ov = overrides?.[normalized];
+  if (ov) {
+    return {
+      provider,
+      canonicalSymbol: normalized,
+      providerSymbol: ov,
+      providerInstId: ov,
+    };
+  }
+
+  const { base, quote } = splitCanonicalSymbol(normalized);
+  const unsupported = PROVIDER_UNSUPPORTED_QUOTES[provider]?.includes(quote) ?? false;
+  if (unsupported) {
+    return {
+      provider,
+      canonicalSymbol: normalized,
+      providerSymbol: '',
+      providerInstId: '',
+    };
+  }
+
+  if (provider === 'coinbase') {
+    // Coinbase uses BASE-QUOTE
+    const pair = `${base}-${quote}`;
+    return { provider, canonicalSymbol: normalized, providerSymbol: pair, providerInstId: pair };
+  }
+
+  if (provider === 'okx') {
+    // OKX spot uses BASE-QUOTE (instId)
+    const pair = `${base}-${quote}`;
+    return { provider, canonicalSymbol: normalized, providerSymbol: pair, providerInstId: pair };
+  }
+
+  if (provider === 'kraken') {
+    // Kraken prefers XBT / USD style, but their WS/REST can accept multiple.
+    const krBase = base === 'BTC' ? 'XBT' : base;
+    const pair = `${krBase}${quote}`;
+    return { provider, canonicalSymbol: normalized, providerSymbol: pair, providerInstId: pair };
+  }
+
+  // Default: concatenated
+  const pair = `${base}${quote}`;
+  return { provider, canonicalSymbol: normalized, providerSymbol: pair, providerInstId: pair };
+};
+
+/**
+ * Build an Instrument object from a canonical symbol.
+ * This keeps backward compatibility with older code paths.
+ */
+export const buildInstrumentFromSymbol = (canonicalSymbol: string): Instrument => {
+  const normalized = normalizeCanonicalSymbol(canonicalSymbol);
+  const { base, quote } = splitCanonicalSymbol(normalized);
+
+  const assetType = isGoldLike(base, normalized) ? 'GOLD' : 'CRYPTO';
+  const id = `${base}${quote}`;
+
+  return {
+    id,
+    assetType,
+    canonicalSymbol: normalized,
+    baseAsset: base,
+    quoteAsset: quote,
+  };
+};
+
+/**
+ * Normalize an Instrument by normalizing its canonicalSymbol and derived fields.
+ */
+export const normalizeInstrument = (provider: string, instrument: Instrument): Instrument => {
+  // Instrument in this repo uses canonicalSymbol; however older code might have `symbol`.
+  const anyInst = instrument as unknown as { canonicalSymbol?: string; symbol?: string };
+  const rawSymbol = anyInst.canonicalSymbol ?? anyInst.symbol ?? '';
+
+  const canonical = normalizeCanonicalSymbol(provider, rawSymbol) ?? normalizeCanonicalSymbol(rawSymbol);
+  const { base, quote } = splitCanonicalSymbol(canonical);
+
+  return {
+    ...instrument,
+    canonicalSymbol: canonical,
+    baseAsset: base,
+    quoteAsset: quote,
+  };
+};
+
+// -----------------
+// Internal helpers
+// -----------------
+
+const cleanupSymbol = (s: string): string => {
+  return String(s)
+    .trim()
+    .toUpperCase()
+    // drop common separators and whitespace
+    .replace(/[\s\-_/.:]+/g, '')
+    // keep only A-Z0-9
+    .replace(/[^A-Z0-9]/g, '');
+};
+
+const parseDelimitedPair = (raw: string): { base: string; quote: string } | null => {
+  const s = String(raw).trim().toUpperCase();
+  const m = s.match(/^([A-Z0-9]{2,12})\s*[-_/]\s*([A-Z0-9]{2,12})$/);
+  if (!m) return null;
+  return { base: m[1], quote: m[2] };
+};
+
+const parseSuffixPair = (cleaned: string): { base: string; quote: string } | null => {
+  for (const quote of QUOTE_ASSETS_SORTED) {
+    if (cleaned.endsWith(quote) && cleaned.length > quote.length) {
+      return { base: cleaned.slice(0, -quote.length), quote };
     }
   }
   return null;
 };
 
-export const providerSymbolFromCanonical = (provider: string, canonicalSymbol: string): string | null => {
-  const parts = splitCanonical(canonicalSymbol);
-  if (!parts) return null;
+const normalizeAssetCode = (provider: string, code: string): string | null => {
+  if (!code) return null;
+  let s = cleanupSymbol(code);
 
-  const base = BASE_ALIASES[parts.base] ?? parts.base;
-  const quote = parts.quote;
-  const canon = `${base}${quote}`;
-
-  const envKey = `MARKET_DATA_SYMBOL_OVERRIDES_${provider.toUpperCase()}`;
-  const overrides = parseOverrides(process.env[envKey]);
-  const overridden = overrides[canon];
-  if (overridden) return overridden;
-
-  // If provider doesn't support this quote and no override exists, skip.
-  const unsupported = PROVIDER_UNSUPPORTED_QUOTES[provider] ?? [];
-  if (unsupported.includes(quote)) return null;
-
-  const ruled = applyProviderQuoteRules(provider, { base, quote });
-
-  switch (provider) {
-    case 'binance':
-    case 'bybit':
-    case 'okx':
-    case 'coinbase':
-    case 'kraken':
-    case 'kcex':
-      // Default for crypto exchanges: BASEQUOTE (or provider specific mapping via override)
-      return `${ruled.base}${ruled.quote}`;
-
-    case 'navasan':
-    case 'brsapi_market':
-    case 'bonbast':
-      // These are *Iran market* providers; they do not support crypto/forex as generic symbols unless overridden.
-      // We rely on overrides for IRT instruments.
-      return null;
-
-    case 'twelvedata': {
-      // ---- IMPORTANT ----
-      // TwelveData does NOT support stablecoin quotes like USDT/USDC for pricing.
-      // Forex/metals usually: BASE/QUOTE (EUR/USD, XAU/USD)
-      // Equities/ETFs usually: TICKER only (AAPL, SPY, QQQ)
-      // Crypto if used is typically: BTC/USD, ETH/USD (BASE/QUOTE) — not BTC/USDT.
-      //
-      // So:
-      // - If quote is not FIAT and no override was provided -> skip
-      // - If base/quote are fiat -> forex style BASE/QUOTE
-      // - If base is commodity and quote is fiat -> BASE/QUOTE
-      // - If base looks like equity/ETF and quote is fiat -> base only
-      // - If base is known crypto and quote is fiat -> BASE/QUOTE
-
-      if (!FIAT_ASSETS.has(ruled.quote)) {
-        // e.g. BTCUSDT, XAUTUSDT, ...
-        return null;
-      }
-
-      // Forex pairs
-      if (FIAT_ASSETS.has(ruled.base) && FIAT_ASSETS.has(ruled.quote)) {
-        return `${ruled.base}/${ruled.quote}`;
-      }
-
-      // Commodities/metals
-      if (COMMODITY_BASES.has(ruled.base) && FIAT_ASSETS.has(ruled.quote)) {
-        return `${ruled.base}/${ruled.quote}`;
-      }
-
-      // Crypto on TwelveData (only when quoted in FIAT)
-      if (TWELVEDATA_CRYPTO_BASES.has(ruled.base) && FIAT_ASSETS.has(ruled.quote)) {
-        return `${ruled.base}/${ruled.quote}`;
-      }
-
-      // Equities/ETFs heuristic: quote is FIAT, base is NOT FIAT and NOT commodity and NOT crypto-base
-      const isEquity =
-        FIAT_ASSETS.has(ruled.quote) &&
-        !FIAT_ASSETS.has(ruled.base) &&
-        !COMMODITY_BASES.has(ruled.base) &&
-        !TWELVEDATA_CRYPTO_BASES.has(ruled.base);
-
-      return isEquity ? ruled.base : `${ruled.base}/${ruled.quote}`;
+  // Kraken sometimes prefixes base/quote with X/Z (e.g., XXBT, ZUSD)
+  if (provider === 'kraken') {
+    // Drop one leading X/Z when the remaining looks like an asset code.
+    if (/^[XZ][A-Z0-9]{2,6}$/.test(s)) {
+      const candidate = s.slice(1);
+      // Heuristic: keep if candidate is known-ish (USD/EUR/GBP/JPY/...) or length >= 3
+      if (candidate.length >= 3) s = candidate;
     }
-
-    default:
-      return null;
-  }
-};
-
-export const canonicalFromProviderSymbol = (provider: string, providerSymbol: string): string | null => {
-  const raw = providerSymbol.toUpperCase().trim();
-
-  // TwelveData: could be "EUR/USD" (forex) OR "AAPL" (equity/ETF) OR "XAU/USD"
-  if (provider === 'twelvedata') {
-    if (raw.includes('/')) {
-      const [b, q] = raw.split('/').map((x) => x.trim());
-      if (!b || !q) return null;
-      return `${b}${q}`;
-    }
-    // Equity-style (AAPL => AAPLUSD)
-    return `${raw}USD`;
   }
 
-  // Forex-like providers might use "EURUSD" already; for exchanges: "BTCUSDT"
-  const parts = splitCanonical(raw);
-  if (parts) {
-    return `${parts.base}${parts.quote}`;
-  }
-
-  return null;
+  if (BASE_ALIASES[s]) s = BASE_ALIASES[s];
+  return s || null;
 };
 
-export const normalizeCanonicalSymbol = (provider: string, symbol: string): string | null => {
-  const canonical = canonicalFromProviderSymbol(provider, symbol);
-  if (!canonical) return null;
+const normalizeKrakenPair = (raw: string): string | null => {
+  const s = cleanupSymbol(raw);
 
-  const parts = splitCanonical(canonical);
-  if (!parts) return null;
+  // Common kraken formats:
+  // - XBTUSD, XXBTZUSD, XETHZUSD, XXRPZUSD, etc.
+  // We'll try suffix quote matching first.
+  const pair = parseSuffixPair(s);
+  if (!pair) return null;
 
-  const base = BASE_ALIASES[parts.base] ?? parts.base;
-  return `${base}${parts.quote}`;
+  const base = normalizeAssetCode('kraken', pair.base);
+  const quote = normalizeAssetCode('kraken', pair.quote);
+  return base && quote ? `${base}${quote}` : null;
 };
 
-export const normalizeCanonicalInstrument = (provider: string, instrument: Instrument): Instrument | null => {
-  const canonicalSymbol = normalizeCanonicalSymbol(provider, instrument.symbol);
-  if (!canonicalSymbol) return null;
-  return { ...instrument, symbol: canonicalSymbol };
+const isGoldLike = (base: string, canonical: string): boolean => {
+  const b = cleanupSymbol(base);
+  const c = cleanupSymbol(canonical);
+  // Common tokens we use across the project.
+  return ['XAU', 'XAUT', 'PAXG'].some((t) => b === t || c.startsWith(t));
 };
