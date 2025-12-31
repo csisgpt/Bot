@@ -104,7 +104,7 @@ export class BrsApiMarketDataProvider extends BaseRestProvider {
     return [];
   }
 
-  private async getSnapshot(): Promise<Map<string, BrsApiItem>> {
+  private async getMarketSnapshot(): Promise<Map<string, BrsApiItem>> {
     if (!this.apiKey) {
       if (!this.missingKeyLogged) {
         this.missingKeyLogged = true;
