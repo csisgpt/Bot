@@ -201,6 +201,28 @@ export const providerSymbolFromCanonical = (
     return null;
   }
 
+  if (provider === 'bonbast') {
+    return null;
+  }
+
+  if (provider === 'brsapi_market') {
+    const defaultMap: Record<string, string> = {
+      USDIRT: 'USD',
+      EURIRT: 'EUR',
+      AEDIRT: 'AED',
+      GBPIRT: 'GBP',
+      SEKKEHIRT: 'IR_COIN_EMAMI',
+      ABSHODEHIRT: 'IR_GOLD_MELTED',
+      GOLD18IRT: 'IR_GOLD_18K',
+      GOLD24IRT: 'IR_GOLD_24K',
+    };
+    const mapped = defaultMap[canonical];
+    if (!mapped) {
+      return null;
+    }
+    return { providerSymbol: mapped, providerInstId: mapped };
+  }
+
   const ruled = applyQuoteRules(
     provider,
     parts.base,

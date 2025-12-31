@@ -23,6 +23,8 @@ export const getProviderEndpoints = (
     kcex: { rest: 'https://api.kcex.com' },
     twelvedata: { rest: 'https://api.twelvedata.com', ws: 'wss://ws.twelvedata.com/v1/quotes/price' },
     navasan: { rest: 'https://api.navasan.tech' },
+    brsapi_market: { rest: 'https://brsapi.ir' },
+    bonbast: { rest: 'https://bonbast.com' },
   };
 
   const envPrefix = provider.toUpperCase();

@@ -208,7 +208,7 @@ Use env overrides to avoid editing `feeds.config.ts`:
 
 ```bash
 FEED_PRICES_SYMBOLS=BTCUSDT,ETHUSDT,EURUSD,USDJPY,XAUUSD,AAPLUSD,USDIRT,EURIRT,SEKKEHIRT,ABSHODEHIRT,GOLD18IRT
-FEED_PRICES_PROVIDERS=binance,bybit,okx,coinbase,kraken,twelvedata,navasan
+FEED_PRICES_PROVIDERS=binance,bybit,okx,coinbase,kraken,twelvedata,navasan,brsapi_market,bonbast
 ```
 
 For Navasan mappings, set symbol overrides:
@@ -217,11 +217,31 @@ For Navasan mappings, set symbol overrides:
 MARKET_DATA_SYMBOL_OVERRIDES_NAVASAN=USDIRT:usd_sell,EURIRT:eur,SEKKEHIRT:sekkeh,ABSHODEHIRT:abshodeh,GOLD18IRT:18ayar
 ```
 
+For BrsApi/Bonbast, use overrides if needed:
+
+```bash
+MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI=USDIRT:USD,EURIRT:EUR,SEKKEHIRT:IR_COIN_EMAMI,ABSHODEHIRT:IR_GOLD_MELTED,GOLD18IRT:IR_GOLD_18K
+MARKET_DATA_SYMBOL_OVERRIDES_BONBAST=USDIRT:usd1,EURIRT:eur1
+```
+
 API keys are required when using these providers:
 
 ```bash
 TWELVEDATA_API_KEY=...
 NAVASAN_API_KEY=...
+```
+
+BrsApi (free) uses the Gold/Currency endpoint (`https://brsapi.ir/Api/Market/Gold_Currency.php`) and requires:
+
+```bash
+BRSAPI_API_KEY=...
+```
+
+Bonbast (paid) requires:
+
+```bash
+BONBAST_USERNAME=...
+BONBAST_HASH=...
 ```
 
 Health endpoints:

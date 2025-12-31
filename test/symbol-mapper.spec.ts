@@ -39,4 +39,27 @@ describe('provider symbol mapping', () => {
       providerInstId: 'usd_sell',
     });
   });
+
+  it('maps brsapi_market defaults and overrides', () => {
+    expect(providerSymbolFromCanonical('brsapi_market', 'USDIRT')).toEqual({
+      providerSymbol: 'USD',
+      providerInstId: 'USD',
+    });
+    expect(providerSymbolFromCanonical('brsapi_market', 'SEKKEHIRT')).toEqual({
+      providerSymbol: 'IR_COIN_EMAMI',
+      providerInstId: 'IR_COIN_EMAMI',
+    });
+    expect(providerSymbolFromCanonical('brsapi_market', 'USDIRT', 'USDIRT:USDD')).toEqual({
+      providerSymbol: 'USDD',
+      providerInstId: 'USDD',
+    });
+  });
+
+  it('requires bonbast overrides', () => {
+    expect(providerSymbolFromCanonical('bonbast', 'USDIRT')).toBeNull();
+    expect(providerSymbolFromCanonical('bonbast', 'USDIRT', 'USDIRT:usd1')).toEqual({
+      providerSymbol: 'usd1',
+      providerInstId: 'usd1',
+    });
+  });
 });

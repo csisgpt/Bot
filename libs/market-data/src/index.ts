@@ -18,6 +18,8 @@ export * from './providers/bitfinex.provider';
 export * from './providers/bitstamp.provider';
 export * from './providers/twelvedata.provider';
 export * from './providers/navasan.provider';
+export * from './providers/brsapi-market.provider';
+export * from './providers/bonbast.provider';
 export * from './providers/interval-mapper';
 export * from './arbitrage/arbitrage-engine';
 export * from './arbitrage/strategies/cross-exchange-spread.strategy';

@@ -22,6 +22,8 @@ const PROVIDER_META: Record<string, { label: string; emoji: string }> = {
   gate: { label: 'Gate', emoji: '🟥' },
   twelvedata: { label: 'TwelveData', emoji: '🟦' },
   navasan: { label: 'Navasan', emoji: '🟧' },
+  brsapi_market: { label: 'BrsApi', emoji: '🟫' },
+  bonbast: { label: 'Bonbast', emoji: '🟧' },
 };
 
 const normalizeProviderKey = (p: string) => p.trim().toLowerCase();

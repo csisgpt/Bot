@@ -15,6 +15,8 @@ import { BitfinexMarketDataProvider } from './providers/bitfinex.provider';
 import { BitstampMarketDataProvider } from './providers/bitstamp.provider';
 import { TwelveDataMarketDataProvider } from './providers/twelvedata.provider';
 import { NavasanMarketDataProvider } from './providers/navasan.provider';
+import { BrsApiMarketDataProvider } from './providers/brsapi-market.provider';
+import { BonbastMarketDataProvider } from './providers/bonbast.provider';
 
 @Module({
   imports: [ConfigModule],
@@ -34,6 +36,8 @@ import { NavasanMarketDataProvider } from './providers/navasan.provider';
     BitstampMarketDataProvider,
     TwelveDataMarketDataProvider,
     NavasanMarketDataProvider,
+    BrsApiMarketDataProvider,
+    BonbastMarketDataProvider,
     {
       provide: MARKET_DATA_PROVIDERS,
       useFactory: (
@@ -50,6 +54,8 @@ import { NavasanMarketDataProvider } from './providers/navasan.provider';
         bitstamp: BitstampMarketDataProvider,
         twelvedata: TwelveDataMarketDataProvider,
         navasan: NavasanMarketDataProvider,
+        brsapiMarket: BrsApiMarketDataProvider,
+        bonbast: BonbastMarketDataProvider,
       ) => [
         binance,
         bybit,
@@ -64,6 +70,8 @@ import { NavasanMarketDataProvider } from './providers/navasan.provider';
         bitstamp,
         twelvedata,
         navasan,
+        brsapiMarket,
+        bonbast,
       ],
       inject: [
         BinanceMarketDataProvider,
@@ -79,6 +87,8 @@ import { NavasanMarketDataProvider } from './providers/navasan.provider';
         BitstampMarketDataProvider,
         TwelveDataMarketDataProvider,
         NavasanMarketDataProvider,
+        BrsApiMarketDataProvider,
+        BonbastMarketDataProvider,
       ],
     },
   ],
