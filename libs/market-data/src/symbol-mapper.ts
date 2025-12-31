@@ -1,110 +1,160 @@
-import { InstrumentMapping } from '../models';
-import { parseOverrides } from '../utils/overrides.util';
+import { Instrument } from './models';
 
-// Quote های استاندارد
-const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'TRY', 'AED', 'IRT', 'IRR'];
-
-// تمایز سهام در TwelveData
-const isEquity = (symbol: { base: string; quote: string }) => {
-  // اگر quote از بین ارزهای معروف نباشد، آن را equity در نظر بگیر
-  return !QUOTE_ASSETS.includes(symbol.quote);
+const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'SEK', 'NOK'];
+const BASE_ALIASES: Record<string, string> = {
+  XBT: 'BTC',
+  XETH: 'ETH',
 };
 
-export interface SplitSymbol {
-  base: string;
-  quote: string;
-}
+const PROVIDER_UNSUPPORTED_QUOTES: Record<string, string[]> = {
+  coinbase: ['USDT'],
+};
 
-/**
- * تقسیم سمبل به base/quote از روی convention
- */
-export const applyQuoteRules = (symbol: string): SplitSymbol | null => {
-  if (!symbol || typeof symbol !== 'string') return null;
-  const s = symbol.trim().toUpperCase();
+const parseOverrides = (raw?: string): Record<string, string> => {
+  // format: "BTCUSDT:BTC-USD,ETHUSDT:ETH-USD"
+  const map: Record<string, string> = {};
+  if (!raw) return map;
+  raw
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .forEach((pair) => {
+      const [canonical, providerSymbol] = pair.split(':').map((x) => x.trim());
+      if (canonical && providerSymbol) map[canonical.toUpperCase()] = providerSymbol;
+    });
+  return map;
+};
 
-  for (const q of QUOTE_ASSETS) {
+export const getSymbolOverridesByProvider = (
+  provider: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> => {
+  const key = `MARKET_DATA_SYMBOL_OVERRIDES_${provider.toUpperCase()}`;
+  return parseOverrides(env[key]);
+};
+
+const splitCanonical = (canonical: string): { base: string; quote: string } | null => {
+  const s = canonical.trim().toUpperCase();
+  for (const q of QUOTE_ASSETS.sort((a, b) => b.length - a.length)) {
     if (s.endsWith(q) && s.length > q.length) {
-      const base = s.slice(0, -q.length);
-      return { base, quote: q };
+      return { base: s.slice(0, -q.length), quote: q };
     }
   }
+  // fallback for FX pairs like EURUSD (6 chars)
+  if (s.length === 6) return { base: s.slice(0, 3), quote: s.slice(3, 6) };
   return null;
 };
 
-/**
- * نگاشت سمبل canonical به provider-specific
- * با در نظر گرفتن overrideها
- */
+const applyAliases = (base: string): string => BASE_ALIASES[base] ?? base;
+
+export const normalizeCanonicalSymbol = (raw: string): string => {
+  if (!raw) return '';
+  const s = raw.trim().toUpperCase();
+
+  // allow "EUR/USD" and "XAU/USD"
+  const slashClean = s.includes('/') ? s.replace('/', '') : s;
+
+  // keep IRT symbols as-is (USDIRT etc)
+  if (slashClean.endsWith('IRT')) return slashClean;
+
+  const parts = splitCanonical(slashClean);
+  if (!parts) return slashClean;
+
+  const base = applyAliases(parts.base);
+  return `${base}${parts.quote}`;
+};
+
+export const describeCanonicalSymbol = (canonical: string): {
+  canonicalSymbol: string;
+  displaySymbol: string;
+  base: string;
+  quote: string;
+} | null => {
+  const norm = normalizeCanonicalSymbol(canonical);
+  const parts = splitCanonical(norm);
+  if (!parts) return null;
+  const { base, quote } = parts;
+  const displaySymbol =
+    norm.length === 6 || (quote.length === 3 && base.length === 3) ? `${base}/${quote}` : `${base}/${quote}`;
+  return { canonicalSymbol: norm, displaySymbol, base, quote };
+};
+
 export const providerSymbolFromCanonical = (
   provider: string,
   canonicalSymbol: string,
-  overrides?: string,
-): string | null => {
-  const overrideMap = parseOverrides(overrides);
-  const override = overrideMap[canonicalSymbol];
-  if (override) return override;
+  opts?: {
+    overrides?: Record<string, string>;
+    preferredQuoteForUnquoted?: string;
+  },
+): { providerSymbol: string; providerInstId?: string } | null => {
+  const normalizedProvider = provider.toLowerCase();
+  const canonical = normalizeCanonicalSymbol(canonicalSymbol);
+  if (!canonical) return null;
 
-  const ruled = applyQuoteRules(canonicalSymbol);
-  if (!ruled) return null;
-
-  // ⚙️ فیلتر مخصوص TwelveData برای جلوگیری از خراب شدن batch
-  if (provider === 'twelvedata') {
-    // ۱. فقط quoteهای فیات مجاز هستند
-    if (['IRT', 'IRR'].includes(ruled.quote)) return null;
-    if (['USDT', 'USDC'].includes(ruled.quote)) return null;
+  const overrides = opts?.overrides ?? {};
+  const override = overrides[canonical.toUpperCase()];
+  if (override) {
+    const ov = override.trim();
+    return { providerSymbol: ov.toUpperCase(), providerInstId: ov.toUpperCase() };
   }
 
-  // 🔹 Provider-specific formats
-  switch (provider) {
-    case 'twelvedata':
-      // سهام یا شاخص‌ها بدون quote می‌آیند
-      if (isEquity(ruled)) return ruled.base;
-      return `${ruled.base}/${ruled.quote}`;
+  const parts = splitCanonical(canonical);
+  if (!parts) return null;
 
-    case 'navasan':
-      return ruled.base.toLowerCase();
+  const base = applyAliases(parts.base);
+  const quote = parts.quote;
 
-    case 'brsapi_market':
-      return ruled.base.toUpperCase();
+  const unsupported = PROVIDER_UNSUPPORTED_QUOTES[normalizedProvider];
+  if (unsupported?.includes(quote)) return null;
 
-    case 'bonbast':
-      return ruled.base.toLowerCase();
-
-    case 'binance':
-    case 'okx':
-    case 'bybit':
-    case 'kraken':
-    case 'coinbase':
-      return `${ruled.base}${ruled.quote}`;
-
-    default:
-      return canonicalSymbol;
+  // special providers that are *mapping-only* (must be overridden)
+  if (normalizedProvider === 'navasan' || normalizedProvider === 'bonbast' || normalizedProvider === 'brsapi_market') {
+    return null;
   }
+
+  if (normalizedProvider === 'coinbase') {
+    // Coinbase uses BASE-QUOTE and prefers USD
+    const q = quote === 'USDT' ? opts?.preferredQuoteForUnquoted ?? 'USD' : quote;
+    const sym = `${base}-${q}`.toUpperCase();
+    return { providerSymbol: sym, providerInstId: sym };
+  }
+
+  if (normalizedProvider === 'kraken') {
+    // Kraken usually supports "XBT/USD" style via overrides; default: BASE/QUOTE
+    const sym = `${base}/${quote}`.toUpperCase();
+    return { providerSymbol: sym, providerInstId: sym };
+  }
+
+  if (normalizedProvider === 'twelvedata') {
+    // TwelveData:
+    // - FX/Metals/Crypto: "EUR/USD", "XAU/USD", "BTC/USD" (usually via overrides)
+    // - Equities/ETFs: "AAPL" (base only) — use override or infer when quote is fiat
+    const isFiatQuote = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'SEK', 'NOK'].includes(quote);
+    const isCommodity = base === 'XAU' || base === 'XAG' || base === 'XPT' || base === 'XPD';
+    const isEquity = isFiatQuote && !isCommodity && base.length >= 3 && base.length <= 6;
+
+    if (isEquity) {
+      const sym = base.toUpperCase();
+      return { providerSymbol: sym, providerInstId: sym };
+    }
+
+    const sym = `${base}/${quote}`.toUpperCase();
+    return { providerSymbol: sym, providerInstId: sym };
+  }
+
+  // default: keep canonical (e.g., BTCUSDT)
+  return { providerSymbol: canonical.toUpperCase(), providerInstId: canonical.toUpperCase() };
 };
 
-/**
- * ساخت mapping برای همه providerها بر اساس overrides و symbol list
- */
-export const mapSymbolsForProviders = (
-  providers: string[],
-  symbols: string[],
-  overridesByProvider: Record<string, string | undefined>,
-): InstrumentMapping[] => {
-  const result: InstrumentMapping[] = [];
+export const buildInstrumentFromSymbol = (canonicalSymbol: string): Instrument | null => {
+  const desc = describeCanonicalSymbol(canonicalSymbol);
+  if (!desc) return null;
 
-  for (const provider of providers) {
-    const overrides = overridesByProvider[provider];
-    for (const canonicalSymbol of symbols) {
-      const providerSymbol = providerSymbolFromCanonical(provider, canonicalSymbol, overrides);
-      if (!providerSymbol) continue;
-
-      result.push({
-        canonicalSymbol,
-        provider,
-        providerInstId: providerSymbol,
-      });
-    }
-  }
-
-  return result;
+  return {
+    canonicalSymbol: desc.canonicalSymbol,
+    displaySymbol: desc.displaySymbol,
+    assetType: desc.quote === 'IRT' ? 'IRAN' : 'GLOBAL',
+    isActive: true,
+    meta: { base: desc.base, quote: desc.quote },
+  } as Instrument;
 };
