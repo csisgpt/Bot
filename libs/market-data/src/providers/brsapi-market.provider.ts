@@ -60,7 +60,7 @@ export class BrsApiMarketDataProvider extends BaseRestProvider {
     if (!instruments.length) {
       return [];
     }
-    const map = await this.getSnapshot();
+    const map = await this.getMarketSnapshot();
     if (!map.size) {
       return [];
     }
