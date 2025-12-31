@@ -237,7 +237,7 @@ export class NavasanMarketDataProvider extends BaseRestProvider {
       canonical === 'SEKKEHIRT' || canonical === 'ABSHODEHIRT';
 
     if (needsThousandRialFix && raw < 2_000_000) {
-      return raw * 100;
+      return raw * 1000;
     }
 
     return raw; // assume already toman
