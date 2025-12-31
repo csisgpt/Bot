@@ -1,325 +1,314 @@
-import { AxiosInstance } from 'axios';
-import { createHttpClient } from '../utils/http.util';
-import { BaseWsProvider } from './base-ws.provider';
-import { Candle, ProviderInstrumentMapping, Ticker } from '../models';
-import { getProviderEndpoints } from './providers.config';
-import { toInterval } from './interval-mapper';
+import WebSocket from 'ws';
 
-type TwelveDataWsPriceMsg =
+import { Logger } from '@nestjs/common';
+import { BaseWsProvider } from './base-ws.provider';
+import { InstrumentMapping, Candle, Ticker } from '../models';
+import { normalizeCandle, normalizeTickerFromBestBidAsk } from '../normalizers';
+import { createHttpClient } from '../utils/http.util';
+import { retry } from '../utils/retry.util';
+import { toInterval } from './interval-mapper';
+import { getProviderEndpoints } from './providers.config';
+
+type TwelveDataWsMessage =
   | { event: 'price'; symbol: string; price: string; timestamp?: number | string }
-  | { event: 'subscribe-status'; status: 'ok' | 'error'; message?: string }
+  | { event: 'subscribe-status'; status: string; success?: boolean; message?: string }
   | { event: 'error'; code?: number; message?: string }
   | Record<string, unknown>;
-
-type TwelveDataQuoteResponse =
-  | {
-      status?: 'ok' | 'error';
-      code?: number;
-      message?: string;
-      symbol?: string;
-      price?: string;
-      bid?: string;
-      ask?: string;
-      timestamp?: number | string;
-    }
-  | any;
-
-type TwelveDataTimeSeriesResponse =
-  | {
-      status?: 'ok' | 'error';
-      code?: number;
-      message?: string;
-      meta?: { symbol?: string };
-      values?: Array<{
-        datetime: string;
-        open: string;
-        high: string;
-        low: string;
-        close: string;
-        volume?: string;
-      }>;
-    }
-  | any;
-
-const toNum = (v: unknown): number | null => {
-  if (v === null || v === undefined) return null;
-  const n = Number(String(v));
-  return Number.isFinite(n) ? n : null;
-};
-
-const chunk = <T>(arr: T[], size: number): T[][] => {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-};
 
 export class TwelveDataMarketDataProvider extends BaseWsProvider {
   readonly name = 'twelvedata';
 
-  supportsWebsocket = true;
-  supportsTickers = true;
-  supportsCandles = true;
-
   private readonly apiKey: string;
-  private readonly maxSymbolsPerRequest: number;
+  private readonly retryAttempts: number;
+  private readonly retryBaseDelayMs: number;
   private readonly timeoutMs: number;
-  private readonly restUrl: string;
-  private readonly wsBaseUrl: string;
+  private readonly maxSymbolsPerRequest: number;
 
-  private readonly http: AxiosInstance;
+  private readonly restClient;
+  private readonly tickerMappings = new Map<string, InstrumentMapping>();
 
-  private tickerMappings = new Map<string, ProviderInstrumentMapping>();
-
-  constructor() {
-    super('twelvedata', {
-      // TwelveData doesn't require a special ping, but having one helps keep some proxies alive.
-      pingIntervalMs: 25000,
-      pingMessage: JSON.stringify({ action: 'ping' }),
-      pingIsText: true,
-    });
-
+  constructor(logger: Logger) {
     const endpoints = getProviderEndpoints('twelvedata');
-    this.restUrl = process.env.TWELVEDATA_REST_URL || endpoints.restBaseUrl;
-    this.wsBaseUrl = process.env.TWELVEDATA_WS_URL || endpoints.wsBaseUrl;
+    super('twelvedata', endpoints.wsUrl, logger);
 
-    this.apiKey =
-      process.env.TWELVEDATA_API_KEY ||
-      process.env.TWELVE_DATA_API_KEY ||
-      '';
+    this.apiKey = process.env.TWELVEDATA_API_KEY || process.env.TWELVE_DATA_API_KEY || '';
+    this.retryAttempts = Number(process.env.TWELVEDATA_RETRY_ATTEMPTS ?? 3);
+    this.retryBaseDelayMs = Number(process.env.TWELVEDATA_RETRY_BASE_DELAY_MS ?? 500);
+    this.timeoutMs = Number(process.env.TWELVEDATA_TIMEOUT_MS ?? 15000);
+    this.maxSymbolsPerRequest = Number(process.env.TWELVEDATA_MAX_SYMBOLS_PER_REQUEST ?? 20);
 
-    this.maxSymbolsPerRequest = Number(process.env.TWELVEDATA_MAX_SYMBOLS_PER_REQUEST || 20);
-    this.timeoutMs = Number(process.env.TWELVEDATA_TIMEOUT_MS || 15000);
-
-    this.http = createHttpClient(this.restUrl, this.timeoutMs);
+    this.restClient = createHttpClient(endpoints.restBaseUrl, this.timeoutMs);
   }
 
-  protected buildUrl(): string {
-    // TwelveData WS endpoint format:
-    // wss://ws.twelvedata.com/v1/quotes/price?apikey=XXX
-    const base = this.wsBaseUrl;
-    const apikey = encodeURIComponent(this.apiKey || '');
-    if (!apikey) return base; // will fail fast; but avoids crashing
-    return `${base}?apikey=${apikey}`;
+  isEnabled(): boolean {
+    return Boolean(this.apiKey);
   }
 
-  subscribeTickers(mappings: ProviderInstrumentMapping[]): void {
-    this.tickerMappings = new Map(mappings.map((m) => [m.canonicalSymbol, m]));
-
-    // If ws is already open, subscribe immediately
-    if (this.isOpen()) {
-      void this.subscribeAllCurrent();
-    }
+  supportsWs(): boolean {
+    return true;
   }
 
-  async connect(): Promise<void> {
-    if (!this.apiKey) {
-      this.logger.warn({ event: 'provider_missing_api_key', provider: this.name });
-      return;
-    }
-    await super.connect();
+  buildUrl(): string {
+    const base = getProviderEndpoints('twelvedata').wsUrl;
+    // TwelveData expects apikey in querystring
+    return `${base}${base.includes('?') ? '&' : '?'}apikey=${encodeURIComponent(this.apiKey)}`;
   }
 
-  protected async onOpen(): Promise<void> {
-    await this.subscribeAllCurrent();
+  protected onWsOpen(ws: WebSocket): void {
+    this.logger.log({ event: 'provider_ws_open', provider: this.name });
   }
 
-  protected async onClose(code: number, reason: Buffer): Promise<void> {
-    // no-op; base handles reconnect
-    void code;
-    void reason;
+  protected onWsClose(code: number, reason: Buffer): void {
+    this.logger.warn({
+      event: 'provider_ws_close',
+      provider: this.name,
+      code,
+      reason: reason?.toString?.() ?? '',
+    });
   }
 
-  protected async onMessage(raw: string): Promise<void> {
-    let msg: TwelveDataWsPriceMsg;
+  protected onWsError(err: Error): void {
+    this.logger.error({ event: 'provider_ws_error', provider: this.name, error: err.message });
+  }
+
+  protected onWsMessage(raw: WebSocket.RawData): void {
+    let msg: TwelveDataWsMessage | null = null;
     try {
-      msg = JSON.parse(raw) as TwelveDataWsPriceMsg;
+      msg = JSON.parse(raw.toString());
     } catch {
       return;
     }
 
-    const event = (msg as any)?.event;
+    if (!msg || typeof msg !== 'object') return;
 
-    if (event === 'subscribe-status') {
-      const status = (msg as any)?.status;
-      if (status !== 'ok') {
-        this.logger.warn({ event: 'twelvedata_subscribe_failed', provider: this.name, msg });
-      }
-      return;
-    }
+    // price message
+    if ((msg as any).event === 'price') {
+      const m = msg as any;
+      const mapping = this.tickerMappings.get(String(m.symbol));
+      if (!mapping) return;
 
-    if (event === 'error') {
-      this.logger.warn({ event: 'twelvedata_ws_error', provider: this.name, msg });
-      return;
-    }
+      const price = Number(m.price);
+      if (!Number.isFinite(price)) return;
 
-    if (event !== 'price') return;
-
-    const symbol = String((msg as any).symbol || '');
-    const price = toNum((msg as any).price);
-    if (!symbol || price === null) return;
-
-    // Map providerSymbol back to canonical mapping
-    const mapping = [...this.tickerMappings.values()].find((m) => m.providerSymbol === symbol);
-    if (!mapping) return;
-
-    const tsRaw = (msg as any).timestamp;
-    const ts =
-      typeof tsRaw === 'number'
-        ? tsRaw * 1000
-        : typeof tsRaw === 'string' && /^\d+$/.test(tsRaw)
-          ? Number(tsRaw) * 1000
+      const ts = typeof m.timestamp === 'number'
+        ? (m.timestamp > 1e12 ? m.timestamp : m.timestamp * 1000)
+        : m.timestamp
+          ? new Date(String(m.timestamp)).getTime()
           : Date.now();
 
-    const ticker: Ticker = {
-      provider: this.name,
-      canonicalSymbol: mapping.canonicalSymbol,
-      ts,
-      last: price,
-      // bid/ask unknown in this stream. Keep undefined (optional in Ticker model).
-    };
+      const normalized = normalizeTickerFromBestBidAsk(
+        this.name,
+        mapping,
+        price,
+        price,
+        price,
+        Number.isFinite(ts) ? ts : Date.now(),
+        undefined,
+      );
 
-    this.emit('ticker', ticker);
-  }
+      if (normalized) this.emitTicker(normalized);
+      return;
+    }
 
-  private async subscribeAllCurrent(): Promise<void> {
-    const symbols = [...this.tickerMappings.values()]
-      .map((m) => m.providerSymbol)
-      .filter(Boolean);
+    // errors / status
+    if ((msg as any).event === 'error') {
+      const m = msg as any;
+      this.logger.warn({
+        event: 'twelvedata_ws_error',
+        provider: this.name,
+        code: m.code,
+        message: m.message,
+      });
+      return;
+    }
 
-    if (symbols.length === 0) return;
-
-    // TwelveData expects a comma separated string
-    for (const batch of chunk(symbols, Math.max(1, this.maxSymbolsPerRequest))) {
-      const payload = {
-        action: 'subscribe',
-        params: { symbols: batch.join(',') },
-      };
-      this.send(JSON.stringify(payload));
+    if ((msg as any).event === 'subscribe-status') {
+      const m = msg as any;
+      this.logger.log({
+        event: 'twelvedata_ws_subscribe_status',
+        provider: this.name,
+        status: m.status,
+        success: m.success,
+        message: m.message,
+      });
     }
   }
 
-  async fetchTickers(mappings: ProviderInstrumentMapping[]): Promise<Ticker[]> {
-    if (!this.apiKey) return [];
+  private subscribeSymbols(providerSymbols: string[]): void {
+    if (providerSymbols.length === 0) return;
 
-    // Prefer REST quote for bid/ask if available
-    const out: Ticker[] = [];
-    const providerSymbols = mappings.map((m) => m.providerSymbol).filter(Boolean);
+    const ws = this.getWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    for (const batch of chunk(providerSymbols, Math.max(1, this.maxSymbolsPerRequest))) {
-      try {
-        const res = await this.http.get<TwelveDataQuoteResponse>('/quote', {
-          params: {
-            symbol: batch.join(','),
-            apikey: this.apiKey,
-          },
-        });
+    const payload = {
+      action: 'subscribe',
+      params: { symbols: providerSymbols.join(',') },
+    };
+    ws.send(JSON.stringify(payload));
+  }
 
-        const data = res.data;
+  async connectWs(mappings: InstrumentMapping[]): Promise<void> {
+    this.tickerMappings.clear();
+    for (const mapping of mappings) {
+      this.tickerMappings.set(mapping.providerSymbol, mapping);
+    }
 
-        // TwelveData sometimes returns array/object depending on count.
-        const items: any[] = Array.isArray(data) ? data : data?.symbol ? [data] : Object.values(data ?? {});
+    await this.connect();
 
-        for (const item of items) {
-          if (!item) continue;
-          if (item.status === 'error') {
-            continue;
-          }
+    // TwelveData may limit how many symbols you can subscribe in a single call on free tiers.
+    // We'll batch subscription calls to be safe.
+    const providerSymbols = mappings.map((m) => m.providerSymbol);
+    for (let i = 0; i < providerSymbols.length; i += this.maxSymbolsPerRequest) {
+      this.subscribeSymbols(providerSymbols.slice(i, i + this.maxSymbolsPerRequest));
+    }
+  }
 
-          const ps = String(item.symbol || '');
-          const mapping = mappings.find((m) => m.providerSymbol === ps);
-          if (!mapping) continue;
+  async disconnectWs(): Promise<void> {
+    await this.disconnect();
+    this.tickerMappings.clear();
+  }
 
-          const bid = toNum(item.bid);
-          const ask = toNum(item.ask);
-          const last = toNum(item.price) ?? bid ?? ask;
+  async fetchTickers(mappings: InstrumentMapping[]): Promise<Ticker[]> {
+    if (mappings.length === 0) return [];
 
-          if (last === null) continue;
+    // Rebuild mapping cache (providerSymbol -> mapping)
+    this.tickerMappings.clear();
+    for (const mapping of mappings) {
+      this.tickerMappings.set(mapping.providerSymbol, mapping);
+    }
 
-          const tsRaw = item.timestamp;
-          const ts =
-            typeof tsRaw === 'number'
-              ? tsRaw * 1000
-              : typeof tsRaw === 'string' && /^\d+$/.test(tsRaw)
-                ? Number(tsRaw) * 1000
-                : Date.now();
+    const now = Date.now();
 
-          const ticker: Ticker = {
+    const toNumber = (v: unknown): number | null => {
+      if (v === null || v === undefined) return null;
+      const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, '').trim());
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const toTimestampMs = (v: unknown): number => {
+      if (v === null || v === undefined) return now;
+      if (typeof v === 'number') {
+        // seconds vs ms heuristic
+        return v > 1e12 ? v : v * 1000;
+      }
+      const s = String(v).trim();
+      const d = new Date(s);
+      const ms = d.getTime();
+      return Number.isFinite(ms) ? ms : now;
+    };
+
+    const results: Ticker[] = [];
+
+    const batches: InstrumentMapping[][] = [];
+    for (let i = 0; i < mappings.length; i += this.maxSymbolsPerRequest) {
+      batches.push(mappings.slice(i, i + this.maxSymbolsPerRequest));
+    }
+
+    for (const batch of batches) {
+      const symbols = batch.map((m) => m.providerSymbol).join(',');
+
+      const response = await retry(
+        async () =>
+          this.restClient.get('/quote', {
+            params: { symbol: symbols, apikey: this.apiKey },
+          }),
+        this.retryAttempts,
+        this.retryBaseDelayMs,
+        this.logger,
+      );
+
+      const raw = response.data as any;
+
+      // TwelveData can return:
+      // - single object { symbol, ... }
+      // - object keyed by symbol { "AAPL": {...}, "MSFT": {...} }
+      // - array of quote objects
+      // - error object { code, message, ... }
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        if ('code' in raw && 'message' in raw && !('symbol' in raw)) {
+          this.logger.warn({
+            event: 'twelvedata_quote_error',
             provider: this.name,
-            canonicalSymbol: mapping.canonicalSymbol,
-            ts,
-            last,
-            bid: bid ?? undefined,
-            ask: ask ?? undefined,
-          };
-
-          out.push(ticker);
+            code: raw.code,
+            message: raw.message,
+          });
+          continue;
         }
-      } catch (err: any) {
-        this.logger.warn({
-          event: 'twelvedata_fetch_quote_failed',
-          provider: this.name,
-          batchSize: batch.length,
-          message: err?.message,
-        });
+      }
+
+      const items: any[] = Array.isArray(raw)
+        ? raw
+        : raw && typeof raw === 'object'
+          ? 'symbol' in raw
+            ? [raw]
+            : Object.values(raw)
+          : [];
+
+      for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+
+        const providerSymbol = String((item as any).symbol ?? (item as any).ticker ?? '');
+        if (!providerSymbol) continue;
+
+        const mapping = this.tickerMappings.get(providerSymbol);
+        if (!mapping) continue;
+
+        const last =
+          toNumber((item as any).price) ??
+          toNumber((item as any).close) ??
+          toNumber((item as any).last) ??
+          toNumber((item as any).bid) ??
+          toNumber((item as any).ask);
+
+        if (last === null) continue;
+
+        const bid = toNumber((item as any).bid) ?? last;
+        const ask = toNumber((item as any).ask) ?? last;
+
+        const ts = toTimestampMs((item as any).timestamp ?? (item as any).datetime);
+        const vol = toNumber((item as any).volume) ?? toNumber((item as any).volume_24h) ?? undefined;
+
+        const normalized = normalizeTickerFromBestBidAsk(this.name, mapping, bid, ask, last, ts, vol);
+        if (normalized) results.push(normalized);
       }
     }
 
-    return out;
+    return results;
   }
 
-  async fetchCandles(mapping: ProviderInstrumentMapping, interval: string, limit: number): Promise<Candle[]> {
-    if (!this.apiKey) return [];
+  async fetchCandles(mapping: InstrumentMapping, interval: string, limit: number): Promise<Candle[]> {
+    const providerInterval = toInterval(this.name, interval);
 
-    const providerInterval = toInterval('twelvedata', interval);
-    if (!providerInterval) return [];
+    const response = await retry(
+      async () =>
+        this.restClient.get('/time_series', {
+          params: {
+            symbol: mapping.providerSymbol,
+            interval: providerInterval,
+            outputsize: limit,
+            apikey: this.apiKey,
+          },
+        }),
+      this.retryAttempts,
+      this.retryBaseDelayMs,
+      this.logger,
+    );
 
-    try {
-      const res = await this.http.get<TwelveDataTimeSeriesResponse>('/time_series', {
-        params: {
-          symbol: mapping.providerSymbol,
-          interval: providerInterval,
-          outputsize: limit,
-          apikey: this.apiKey,
-        },
-      });
+    const values = (response.data?.values ?? []) as any[];
 
-      const data = res.data;
-      if (!data || data.status === 'error') return [];
+    const candles = values
+      .map((v) =>
+        normalizeCandle(this.name, mapping, {
+          ts: new Date(v.datetime).getTime(),
+          open: Number(v.open),
+          high: Number(v.high),
+          low: Number(v.low),
+          close: Number(v.close),
+          volume: v.volume ? Number(v.volume) : undefined,
+        }),
+      )
+      .filter(Boolean) as Candle[];
 
-      const values = Array.isArray(data.values) ? data.values : [];
-      // values are usually newest-first
-      return values
-        .map((v) => {
-          const ts = Date.parse(v.datetime);
-          const open = toNum(v.open);
-          const high = toNum(v.high);
-          const low = toNum(v.low);
-          const close = toNum(v.close);
-          const volume = toNum(v.volume);
-
-          if (!Number.isFinite(ts) || open === null || high === null || low === null || close === null) return null;
-
-          const c: Candle = {
-            ts,
-            open,
-            high,
-            low,
-            close,
-            volume: volume ?? undefined,
-          };
-          return c;
-        })
-        .filter(Boolean) as Candle[];
-    } catch (err: any) {
-      this.logger.warn({
-        event: 'twelvedata_fetch_candles_failed',
-        provider: this.name,
-        symbol: mapping.providerSymbol,
-        interval,
-        limit,
-        message: err?.message,
-      });
-      return [];
-    }
+    return candles.reverse();
   }
 }
