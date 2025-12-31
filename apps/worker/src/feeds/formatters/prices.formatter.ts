@@ -7,7 +7,7 @@ export interface PriceAggregation {
   spreadPct?: number | null;
 }
 
-type PricesFeedFormat = 'table' | 'compact'; // برای سازگاری؛ "table" رو هم می‌گیریم ولی خروجی‌مون جدولی نیست.
+type PricesFeedFormat = 'table' | 'compact'; // برای سازگاری؛ خروجی جدید، "card/section" است.
 
 const QUOTE_ASSETS = ['USDT', 'USDC', 'USD', 'EUR', 'GBP', 'BTC', 'ETH', 'IRT', 'IRR'] as const;
 
@@ -26,13 +26,29 @@ const PROVIDER_META: Record<string, { label: string; emoji: string }> = {
   bonbast: { label: 'Bonbast', emoji: '🟧' },
 };
 
+const PROVIDER_SHORT: Record<string, string> = {
+  binance: 'BN',
+  bybit: 'BY',
+  okx: 'OKX',
+  kucoin: 'KC',
+  kraken: 'KR',
+  coinbase: 'CB',
+  mexc: 'MX',
+  gate: 'GT',
+  twelvedata: 'TD',
+  navasan: 'NV',
+  brsapi_market: 'BRS',
+  bonbast: 'BB',
+};
+
 const normalizeProviderKey = (p: string) => p.trim().toLowerCase();
 
-const providerDisplay = (provider: string): { text: string; emoji: string } => {
+const providerDisplay = (provider: string): { text: string; emoji: string; short: string } => {
   const key = normalizeProviderKey(provider);
   const meta = PROVIDER_META[key];
   const safeLabel = escapeHtml(meta?.label ?? provider.trim());
-  return { text: safeLabel, emoji: meta?.emoji ?? '🏦' };
+  const short = escapeHtml(PROVIDER_SHORT[key] ?? (meta?.label ?? provider.trim()).slice(0, 6).toUpperCase());
+  return { text: safeLabel, emoji: meta?.emoji ?? '🏦', short };
 };
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -42,19 +58,6 @@ const formatPrice = (value: number): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 6,
   }).format(value);
-
-const formatSpread = (value?: number | null): string => {
-  if (!isFiniteNumber(value)) return 'N/A';
-  // 0.34 -> "0.34%"
-  return `${value.toFixed(2)}%`;
-};
-
-const spreadBadge = (value?: number | null): string => {
-  if (!isFiniteNumber(value)) return '⚪️ <i>N/A</i>';
-  if (value <= 0.15) return `🟢 <b>${formatSpread(value)}</b>`;
-  if (value <= 0.5) return `🟡 <b>${formatSpread(value)}</b>`;
-  return `🔴 <b>${formatSpread(value)}</b>`;
-};
 
 const formatTimestamp = (timestamp: number): string =>
   new Date(timestamp).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
@@ -74,7 +77,9 @@ const prettySymbol = (raw: string): string => {
   return s;
 };
 
-const divider = '────────────';
+// Dividerهای جدید (حس “کارت/بخش”)
+const divider = '━━━━━━━━━━━━━━━━━━━━';
+const softDivider = '────────────';
 
 const parseCsvMap = (raw?: string): Record<string, string> => {
   if (!raw) return {};
@@ -131,37 +136,34 @@ const getIranExtraUnit = (symbol: string): string | null => {
   return units[normalized] ?? null;
 };
 
-const formatIranPrice = (value: number, symbol: string): { primaryText: string; secondaryText?: string } => {
-  if (!Number.isFinite(value)) {
-    return { primaryText: 'N/A' };
-  }
-  const iranValueUnit = resolveIranValueUnit();
-  const iranShowBoth = resolveIranShowBoth();
-  if (iranValueUnit === 'rial') {
-    const primary = formatIranNumber(value);
-    const secondary = formatIranNumber(value / 10);
-    const primaryUnit = getIranUnit(symbol, 'ریال');
-    const secondaryUnit = 'تومان';
-    return {
-      primaryText: `${primary} ${primaryUnit}`,
-      secondaryText: iranShowBoth ? `${secondary} ${secondaryUnit}` : undefined,
-    };
-  }
-  const primary = formatIranNumber(value);
-  const secondary = formatIranNumber(value * 10);
-  const primaryUnit = getIranUnit(symbol, 'تومان');
-  const secondaryUnit = 'ریال';
-  return {
-    primaryText: `${primary} ${primaryUnit}`,
-    secondaryText: iranShowBoth ? `${secondary} ${secondaryUnit}` : undefined,
-  };
-};
+// NOTE: نسخه‌ی قبلی formatIranPrice نگه داشته شد (حذف نکردم).
+// const formatIranPrice = (...) => ...
 
 const cleanLines = (lines: string[]) =>
   lines
     .map((x) => x.trimEnd())
     .filter((line, i, arr) => !(line === '' && arr[i - 1] === ''))
     .join('\n');
+
+type SectionKey = 'crypto' | 'fx' | 'metals' | 'iran' | 'other';
+
+const classify = (rawSymbol: string): SectionKey => {
+  if (isIranSymbol(rawSymbol)) return 'iran';
+
+  const s = prettySymbol(rawSymbol).toUpperCase();
+  // Metals / commodities
+  if (s.includes('XAU') || s.includes('XAG') || s.includes('XAUT')) return 'metals';
+
+  // FX (fiat crosses)
+  const fiat = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'CHF', 'AUD', 'NZD'] as const;
+  const parts = s.split('/');
+  if (parts.length === 2 && fiat.includes(parts[0] as any) && fiat.includes(parts[1] as any)) return 'fx';
+
+  // Crypto (USDT/USDC mostly)
+  if (s.endsWith('/USDT') || s.endsWith('/USDC') || s.endsWith('/BTC') || s.endsWith('/ETH')) return 'crypto';
+
+  return 'other';
+};
 
 export const formatPricesFeedMessage = (params: {
   aggregations: PriceAggregation[];
@@ -171,20 +173,26 @@ export const formatPricesFeedMessage = (params: {
 }): string => {
   const { aggregations, format, includeTimestamp, timestamp = Date.now() } = params;
 
-  // NOTE: format فعلاً صرفاً برای سازگاری ورودی نگه داشته شده.
+  // NOTE: format فعلاً برای سازگاری نگه داشته شده.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _formatCompat = format;
 
   const header: string[] = [];
-  header.push('🧭 <b>چنده؟</b>  <i>Best Price</i>');
-  if (includeTimestamp) header.push(`🕒 <i>${formatTimestamp(timestamp)}</i>`);
+  header.push(`🧭 <b>Best Prices</b>  <i>Snapshot</i>`);
+  if (includeTimestamp) header.push(`🕒 <code>${escapeHtml(formatTimestamp(timestamp))}</code>`);
   header.push(divider);
 
-  const lines: string[] = [];
+  const groups: Record<SectionKey, string[]> = {
+    crypto: [],
+    fx: [],
+    metals: [],
+    iran: [],
+    other: [],
+  };
+
+  const usedProviders = new Map<string, { emoji: string; label: string; short: string }>();
 
   for (const ag of aggregations) {
-    const iran = isIranSymbol(ag.symbol);
-
     const entries = (ag.entries ?? [])
       .filter((e) => isFiniteNumber(e.price))
       .map((e) => ({
@@ -194,45 +202,99 @@ export const formatPricesFeedMessage = (params: {
       }))
       .sort((a, b) => a.price - b.price);
 
+    const section = classify(ag.symbol);
+
     if (entries.length === 0) {
-      const name = iran ? escapeHtml(getIranLabel(ag.symbol)) : escapeHtml(prettySymbol(ag.symbol));
-      lines.push(`⚠️ ${name} — <b>N/A</b>`);
+      const title =
+        section === 'iran'
+          ? escapeHtml(getIranLabel(ag.symbol))
+          : escapeHtml(prettySymbol(ag.symbol));
+      groups[section].push(`• <b>${title}</b>  —  <b>N/A</b>  <i>no data</i>`);
       continue;
     }
 
     const best = entries[0];
-    const bestP = providerDisplay(best.provider);
+    const p = providerDisplay(best.provider);
+    usedProviders.set(normalizeProviderKey(best.provider), { emoji: p.emoji, label: p.text, short: p.short });
 
-    if (iran) {
+    if (section === 'iran') {
+      // عددها داخل <code> برای کنترل بهتر RTL/LTR
       const label = escapeHtml(getIranLabel(ag.symbol));
       const extraUnit = getIranExtraUnit(ag.symbol);
-      const extraSuffix = extraUnit ? ` <i>(هر ${escapeHtml(extraUnit)})</i>` : '';
+      const extraSuffix = extraUnit ? `  <i>· هر ${escapeHtml(extraUnit)}</i>` : '';
 
-      const priceText = formatIranPrice(best.price, ag.symbol);
-      const primary = escapeHtml(priceText.primaryText);
-      const secondary = priceText.secondaryText ? escapeHtml(priceText.secondaryText) : null;
+      const iranValueUnit = resolveIranValueUnit();
+      const iranShowBoth = resolveIranShowBoth();
 
-      lines.push(
-        `🇮🇷 ${label} — <b>${primary}</b>${secondary ? `  <i>(${secondary})</i>` : ''}${extraSuffix}`,
-      );
+      if (iranValueUnit === 'rial') {
+        const primaryNum = escapeHtml(formatIranNumber(best.price));
+        const secondaryNum = escapeHtml(formatIranNumber(best.price / 10));
+        const primaryUnit = escapeHtml(getIranUnit(ag.symbol, 'ریال'));
+        const secondaryUnit = 'تومان';
+
+        groups.iran.push(
+          `• 🇮🇷 <b>${label}</b>  —  <b><code>${primaryNum}</code></b> ${primaryUnit}${
+            iranShowBoth ? `  <i>(<code>${secondaryNum}</code> ${secondaryUnit})</i>` : ''
+          }${extraSuffix}  <i>· ${p.emoji} ${p.text}</i>`,
+        );
+      } else {
+        const primaryNum = escapeHtml(formatIranNumber(best.price));
+        const secondaryNum = escapeHtml(formatIranNumber(best.price * 10));
+        const primaryUnit = escapeHtml(getIranUnit(ag.symbol, 'تومان'));
+        const secondaryUnit = 'ریال';
+
+        groups.iran.push(
+          `• 🇮🇷 <b>${label}</b>  —  <b><code>${primaryNum}</code></b> ${primaryUnit}${
+            iranShowBoth ? `  <i>(<code>${secondaryNum}</code> ${secondaryUnit})</i>` : ''
+          }${extraSuffix}  <i>· ${p.emoji} ${p.text}</i>`,
+        );
+      }
+
       continue;
     }
 
+    // غیر ایران: یک خط تمیز و قابل اسکن
     const symbol = escapeHtml(prettySymbol(ag.symbol));
     const price = escapeHtml(formatPrice(best.price));
 
-    // NOTE: اگر نمی‌خوای سورس/پرووایدر نمایش داده بشه، این بخش رو کامنت کن:
-    const source = ` <i>(${bestP.emoji} ${bestP.text})</i>`;
+    groups[section].push(`• <b>${symbol}</b>  —  <b><code>${price}</code></b>  <i>· ${p.emoji} ${p.text}</i>`);
 
-    lines.push(`🔹 ${symbol} — <b>${price}</b>${source}`);
-
-    // NOTE: جزئیات قبلی مثل Range/Spread/Providers حذف نشدن، فقط دیگه نمایش داده نمی‌شن:
+    // NOTE: جزئیات قبلی (Range/Spread/Providers list) حذف نشد؛ فقط دیگه نمایش داده نمی‌شه.
     // const low = entries[0];
     // const high = entries[entries.length - 1];
-    // const rangeText = entries.length >= 2 ? ... : ...;
-    // const spreadText = ... spreadBadge(ag.spreadPct) ...
+    // const rangeText = ...
+    // const spreadText = ...
     // const providerLines = ...
   }
 
-  return cleanLines([...header, ...lines]);
+  const body: string[] = [];
+
+  const pushSection = (title: string, key: SectionKey) => {
+    if (!groups[key].length) return;
+    body.push(`🔸 <b>${title}</b>`);
+    body.push(...groups[key]);
+    body.push(''); // فاصله نرم بین بخش‌ها
+  };
+
+  pushSection('Crypto', 'crypto');
+  pushSection('FX', 'fx');
+  pushSection('Metals', 'metals');
+  pushSection('Other', 'other');
+  pushSection('Iran', 'iran');
+
+  // Footer: legend کوتاه و اعتمادساز
+  const used = Array.from(usedProviders.values());
+  if (used.length) {
+    body.push(softDivider);
+    const legend = used
+      .slice(0, 8) // طول پیام رو کنترل می‌کنیم
+      .map((x) => `${x.emoji} <b>${x.short}</b>=${x.label}`)
+      .join('  •  ');
+    body.push(`ⓘ <i>Sources</i>: ${legend}`);
+  }
+
+  // حذف فاصله‌ی اضافه‌ی آخر
+  while (body.length && body[body.length - 1] === '') body.pop();
+
+  return cleanLines([...header, ...body]);
 };
