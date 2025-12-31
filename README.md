@@ -217,10 +217,11 @@ For Navasan mappings, set symbol overrides:
 MARKET_DATA_SYMBOL_OVERRIDES_NAVASAN=USDIRT:usd_sell,EURIRT:eur,SEKKEHIRT:sekkeh,ABSHODEHIRT:abshodeh,GOLD18IRT:18ayar
 ```
 
-For BrsApi/Bonbast, use overrides if needed:
+For BrsApi/Bonbast, use overrides if needed (preferred key + alias):
 
 ```bash
-MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI=USDIRT:USD,EURIRT:EUR,SEKKEHIRT:IR_COIN_EMAMI,ABSHODEHIRT:IR_GOLD_MELTED,GOLD18IRT:IR_GOLD_18K
+MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET=USDIRT:USD,EURIRT:EUR,SEKKEHIRT:IR_COIN_EMAMI,ABSHODEHIRT:IR_GOLD_MELTED,GOLD18IRT:IR_GOLD_18K
+MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI=USDIRT:USD,EURIRT:EUR
 MARKET_DATA_SYMBOL_OVERRIDES_BONBAST=USDIRT:usd1,EURIRT:eur1
 ```
 
@@ -231,11 +232,14 @@ TWELVEDATA_API_KEY=...
 NAVASAN_API_KEY=...
 ```
 
-BrsApi (free) uses the Gold/Currency endpoint (`https://brsapi.ir/Api/Market/Gold_Currency.php`) and requires:
+BrsApi (free) uses the Gold/Currency endpoint (`https://brsapi.ir/Api/Market/Gold_Currency.php`) and requires (preferred key + alias):
 
 ```bash
+BRSAPI_MARKET_API_KEY=...
 BRSAPI_API_KEY=...
 ```
+
+Preferred config keys use the `BRSAPI_MARKET_` prefix (REST URL, timeouts, retries). `BRSAPI_*` keys are accepted as aliases for backward compatibility.
 
 Bonbast (paid) requires:
 

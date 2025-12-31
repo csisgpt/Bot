@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { getEnvFirst } from '../utils/env-alias';
 
 export interface ProviderEndpoints {
   rest: string;
@@ -28,7 +29,10 @@ export const getProviderEndpoints = (
   };
 
   const envPrefix = provider.toUpperCase();
-  const restOverride = configService.get<string>(`${envPrefix}_REST_URL`);
+  const restOverride =
+    provider === 'brsapi_market'
+      ? getEnvFirst('BRSAPI_MARKET_REST_URL', 'BRSAPI_REST_URL')
+      : configService.get<string>(`${envPrefix}_REST_URL`);
   const wsOverride = configService.get<string>(`${envPrefix}_WS_URL`);
   const defaultsForProvider = defaults[provider] ?? { rest: '', ws: undefined };
 

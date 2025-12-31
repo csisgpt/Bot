@@ -5,6 +5,7 @@ import { Candle, InstrumentMapping, Ticker } from '../models';
 import { normalizeTickerFromBestBidAsk } from '../normalizers';
 import { createHttpClient } from '../utils/http.util';
 import { retry } from '../utils/retry.util';
+import { getEnvFirst, getEnvFirstInt } from '../utils/env-alias';
 import { getProviderEndpoints } from './providers.config';
 
 interface BrsApiItem {
@@ -29,15 +30,30 @@ export class BrsApiMarketDataProvider extends BaseRestProvider {
   private readonly cacheTtlMs = 15_000;
   private cacheTs = 0;
   private cacheMap: Map<string, BrsApiItem> = new Map();
+  private missingKeyLogged = false;
 
   constructor(private readonly configService: ConfigService) {
     super('brsapi_market');
     const endpoints = getProviderEndpoints(configService, 'brsapi_market');
-    const timeoutMs = configService.get<number>('BRSAPI_TIMEOUT_MS', 15000);
+    const timeoutMs = getEnvFirstInt(
+      configService.get<number>('BRSAPI_MARKET_TIMEOUT_MS', 15000),
+      'BRSAPI_MARKET_TIMEOUT_MS',
+      'BRSAPI_TIMEOUT_MS',
+    );
     this.restClient = createHttpClient(endpoints.rest, timeoutMs);
-    this.apiKey = configService.get<string>('BRSAPI_API_KEY', '');
-    this.retryAttempts = configService.get<number>('BRSAPI_RETRY_ATTEMPTS', 3);
-    this.retryBaseDelayMs = configService.get<number>('BRSAPI_RETRY_BASE_DELAY_MS', 500);
+    this.apiKey =
+      getEnvFirst('BRSAPI_MARKET_API_KEY', 'BRSAPI_API_KEY') ??
+      configService.get<string>('BRSAPI_MARKET_API_KEY', '');
+    this.retryAttempts = getEnvFirstInt(
+      configService.get<number>('BRSAPI_MARKET_RETRY_ATTEMPTS', 3),
+      'BRSAPI_MARKET_RETRY_ATTEMPTS',
+      'BRSAPI_RETRY_ATTEMPTS',
+    );
+    this.retryBaseDelayMs = getEnvFirstInt(
+      configService.get<number>('BRSAPI_MARKET_RETRY_BASE_DELAY_MS', 500),
+      'BRSAPI_MARKET_RETRY_BASE_DELAY_MS',
+      'BRSAPI_RETRY_BASE_DELAY_MS',
+    );
   }
 
   async fetchTickers(instruments: InstrumentMapping[]): Promise<Ticker[]> {
@@ -89,6 +105,18 @@ export class BrsApiMarketDataProvider extends BaseRestProvider {
   }
 
   private async getSnapshot(): Promise<Map<string, BrsApiItem>> {
+    if (!this.apiKey) {
+      if (!this.missingKeyLogged) {
+        this.missingKeyLogged = true;
+        this.logger.error(
+          JSON.stringify({
+            event: 'brsapi_missing_api_key',
+            provider: this.provider,
+          }),
+        );
+      }
+      return new Map();
+    }
     if (Date.now() - this.cacheTs < this.cacheTtlMs && this.cacheMap.size) {
       return this.cacheMap;
     }

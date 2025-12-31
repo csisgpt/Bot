@@ -185,11 +185,22 @@ export const providerSymbolFromCanonical = (
   if (!parts) return null;
 
   const providerKey = provider.toUpperCase();
-  const overridesValue =
-    overridesRaw ?? process.env[`MARKET_DATA_SYMBOL_OVERRIDES_${providerKey}`];
   const preferredQuoteValue =
     preferredQuoteRaw ?? process.env[`MARKET_DATA_PREFERRED_QUOTE_${providerKey}`];
-  const overrides = parseOverrides(overridesValue);
+  const overrides = (() => {
+    if (provider === 'brsapi_market') {
+      const primary =
+        overridesRaw ?? process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET;
+      const alias = process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI;
+      return {
+        ...parseOverrides(alias),
+        ...parseOverrides(primary),
+      };
+    }
+    const overridesValue =
+      overridesRaw ?? process.env[`MARKET_DATA_SYMBOL_OVERRIDES_${providerKey}`];
+    return parseOverrides(overridesValue);
+  })();
   const canonical = normalizeCanonicalSymbol(symbol);
   const overridden = overrides[canonical];
 

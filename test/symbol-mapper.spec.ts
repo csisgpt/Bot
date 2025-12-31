@@ -55,6 +55,34 @@ describe('provider symbol mapping', () => {
     });
   });
 
+  it('uses brsapi_market override aliases with precedence', () => {
+    const prevPrimary = process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET;
+    const prevAlias = process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI;
+
+    process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI = 'USDIRT:USD_ALIAS';
+    expect(providerSymbolFromCanonical('brsapi_market', 'USDIRT')).toEqual({
+      providerSymbol: 'USD_ALIAS',
+      providerInstId: 'USD_ALIAS',
+    });
+
+    process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET = 'USDIRT:USD_PRIMARY';
+    expect(providerSymbolFromCanonical('brsapi_market', 'USDIRT')).toEqual({
+      providerSymbol: 'USD_PRIMARY',
+      providerInstId: 'USD_PRIMARY',
+    });
+
+    if (prevPrimary === undefined) {
+      delete process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET;
+    } else {
+      process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET = prevPrimary;
+    }
+    if (prevAlias === undefined) {
+      delete process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI;
+    } else {
+      process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI = prevAlias;
+    }
+  });
+
   it('requires bonbast overrides', () => {
     expect(providerSymbolFromCanonical('bonbast', 'USDIRT')).toBeNull();
     expect(providerSymbolFromCanonical('bonbast', 'USDIRT', 'USDIRT:usd1')).toEqual({

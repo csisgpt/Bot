@@ -164,6 +164,7 @@ const envObject = z
     MARKET_DATA_SYMBOL_OVERRIDES_NAVASAN: z.string().trim().optional(),
     MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI: z.string().trim().optional(),
     MARKET_DATA_SYMBOL_OVERRIDES_BONBAST: z.string().trim().optional(),
+    MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET: z.string().trim().optional(),
 
     TWELVEDATA_API_KEY: z.string().trim().optional().default(""),
     TWELVEDATA_REST_URL: z.string().trim().default("https://api.twelvedata.com"),
@@ -184,6 +185,11 @@ const envObject = z
     BRSAPI_TIMEOUT_MS: toInt(15000).pipe(z.number().int().min(1000).max(120_000)),
     BRSAPI_RETRY_ATTEMPTS: toInt(3).pipe(z.number().int().min(1).max(10)),
     BRSAPI_RETRY_BASE_DELAY_MS: toInt(500).pipe(z.number().int().min(100).max(10_000)),
+    BRSAPI_MARKET_API_KEY: z.string().trim().optional().default(""),
+    BRSAPI_MARKET_REST_URL: z.string().trim().default("https://brsapi.ir"),
+    BRSAPI_MARKET_TIMEOUT_MS: toInt(15000).pipe(z.number().int().min(1000).max(120_000)),
+    BRSAPI_MARKET_RETRY_ATTEMPTS: toInt(3).pipe(z.number().int().min(1).max(10)),
+    BRSAPI_MARKET_RETRY_BASE_DELAY_MS: toInt(500).pipe(z.number().int().min(100).max(10_000)),
 
     BONBAST_USERNAME: z.string().trim().optional().default(""),
     BONBAST_HASH: z.string().trim().optional().default(""),
