@@ -1,8 +1,7 @@
-import { InstrumentMapping, MarketType } from './models';
+import { InstrumentMapping } from './models';
 
 /**
  * Normalize any input into canonical SYMBOL format.
- * This function MUST be defensive: input may NOT be string.
  */
 export function normalizeCanonicalSymbol(raw: unknown): string {
   if (typeof raw === 'string') {
@@ -14,7 +13,6 @@ export function normalizeCanonicalSymbol(raw: unknown): string {
   }
 
   if (raw && typeof raw === 'object') {
-    // common patterns
     if ('symbol' in raw && typeof (raw as any).symbol === 'string') {
       return (raw as any).symbol.trim().toUpperCase();
     }
@@ -24,14 +22,11 @@ export function normalizeCanonicalSymbol(raw: unknown): string {
     }
   }
 
-  // fallback (VERY IMPORTANT: never crash)
   return '';
 }
 
 /**
- * Split canonical symbol into base/quote
- * BTCUSDT → BTC / USDT
- * EURUSD → EUR / USD
+ * Split canonical symbol into base / quote
  */
 export function splitCanonicalSymbol(raw: unknown): {
   base: string;
@@ -44,7 +39,7 @@ export function splitCanonicalSymbol(raw: unknown): {
     'USDT', 'USDC', 'USD',
     'EUR', 'GBP', 'JPY',
     'IRT', 'IRR',
-    'BTC', 'ETH'
+    'BTC', 'ETH',
   ];
 
   for (const quote of QUOTES) {
@@ -60,21 +55,27 @@ export function splitCanonicalSymbol(raw: unknown): {
 }
 
 /**
- * Build provider instrument mapping
+ * Build InstrumentMapping from canonical symbol
+ * ⚠️ Required by InstrumentRegistryService
  */
-export function providerSymbolFromCanonical(
+export function buildInstrumentFromSymbol(
   provider: string,
-  canonicalSymbol: unknown,
+  rawSymbol: unknown,
 ): InstrumentMapping | null {
-  const normalized = normalizeCanonicalSymbol(canonicalSymbol);
-  if (!normalized) return null;
+  const canonical = normalizeCanonicalSymbol(rawSymbol);
+  if (!canonical) return null;
 
   return {
     provider,
-    canonicalSymbol: normalized,
-    providerSymbol: normalized,
-    providerInstId: normalized,
-    marketType: MarketType.SPOT,
+    canonicalSymbol: canonical,
+    providerSymbol: canonical,
+    providerInstId: canonical,
+    marketType: 'SPOT', // 👈 IMPORTANT: string, NOT enum
     isActive: true,
   };
 }
+
+/**
+ * Alias used by some providers
+ */
+export const providerSymbolFromCanonical = buildInstrumentFromSymbol;
