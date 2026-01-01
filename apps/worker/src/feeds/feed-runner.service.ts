@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { MarketDataCacheService } from '../market-data-v3/market-data-cache.service';
-import { MarketDataProvidersService } from '../market-data-v3/market-data-providers.service';
+import { MarketDataCacheService, CachedTicker } from '../market-data-v3/market-data-cache.service';
 import { TelegramPublisherService } from '../telegram/telegram-publisher.service';
-import { normalizeCanonicalSymbol } from '@libs/market-data';
+import { InstrumentRegistryService, ProviderRegistryService, normalizeCanonicalSymbol } from '@libs/market-data';
 import { formatPricesFeedMessage } from './formatters/prices.formatter';
 import { formatNewsFeedMessage } from './formatters/news.formatter';
 import { FeedConfigService } from './feed-config.service';
@@ -18,12 +17,13 @@ export class FeedRunnerService {
   constructor(
     private readonly feedConfig: FeedConfigService,
     private readonly marketDataCache: MarketDataCacheService,
-    private readonly providers: MarketDataProvidersService,
+    private readonly instrumentRegistry: InstrumentRegistryService,
+    private readonly providerRegistry: ProviderRegistryService,
     private readonly telegram: TelegramPublisherService,
   ) {}
 
   async runFeed(feedId: string, type: FeedType): Promise<void> {
-    const feed = this.feedConfig.get(feedId, type);
+    const feed = this.feedConfig.getFeed(feedId, type);
     if (!feed || !feed.enabled) {
       this.logger.debug(`feed disabled or missing: id=${feedId} type=${type}`);
       return;
@@ -73,27 +73,40 @@ export class FeedRunnerService {
       return;
     }
 
-    // ensure symbol mappings exist
-    await this.providers.buildMappings({ providers: effectiveProviders, symbols: canonicalSymbols });
+    const symbolSet = new Set(canonicalSymbols);
+    const enabledProviders = new Set(
+      this.providerRegistry.getEnabledProviders().map((provider) => provider.provider),
+    );
 
-    // gather cached tickers for each provider
-    const providerTickers = new Map<string, any[]>();
     for (const provider of effectiveProviders) {
-      const cached = await this.marketDataCache.getTickersCached(provider, canonicalSymbols);
+      if (!enabledProviders.has(provider.toLowerCase())) {
+        this.logger.warn(`[${runId}] provider not enabled in registry: ${provider}`);
+        continue;
+      }
+      const mappings = this.instrumentRegistry
+        .getMappingsForProvider(provider)
+        .filter((mapping) => symbolSet.has(mapping.canonicalSymbol));
+      if (mappings.length) {
+        await this.marketDataCache.warmCache({ provider, instruments: mappings });
+      }
+    }
+
+    const providerTickers = new Map<string, CachedTicker[]>();
+    for (const provider of effectiveProviders) {
+      const cached = await this.marketDataCache.getTickersCached({
+        provider,
+        symbols: canonicalSymbols,
+      });
       providerTickers.set(provider, cached);
     }
 
+    const aggregations = this.marketDataCache.aggregateBestPrices({
+      symbols: canonicalSymbols,
+      providerTickers,
+    });
+
     const message = formatPricesFeedMessage({
-      aggregations: canonicalSymbols.map((symbol) => ({
-        symbol,
-        entries: effectiveProviders
-          .map((provider) => {
-            const list = providerTickers.get(provider) ?? [];
-            const hit = list.find((x) => x.symbol === symbol);
-            return hit ? { provider, price: hit.price } : null;
-          })
-          .filter(Boolean) as Array<{ provider: string; price: number }>,
-      })),
+      aggregations,
       format,
       includeTimestamp,
       timestamp: Date.now(),
@@ -118,12 +131,14 @@ export class FeedRunnerService {
       return;
     }
 
-    const items = await this.providers.getNews({ providers: effectiveProviders, maxItems });
+    const items = await this.marketDataCache.fetchNews({
+      providers: effectiveProviders,
+      maxItems,
+    });
 
     const message = formatNewsFeedMessage({
       items,
       includeTags,
-      timestamp: Date.now(),
     });
 
     await Promise.all(destinations.map((chatId) => this.telegram.sendMessage(chatId, message, { parseMode: 'HTML' })));

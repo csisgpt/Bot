@@ -17,6 +17,13 @@ export class ActiveSymbolsService {
     private readonly monitoringPlanService?: MonitoringPlanService,
   ) {}
 
+  private parseCsv(raw?: string): string[] {
+    return (raw ?? '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
   async resolveActiveSymbols(): Promise<string[]> {
     const watchlists = await this.prismaService.chatConfig.findMany({
       select: { watchlist: true },
@@ -29,6 +36,17 @@ export class ActiveSymbolsService {
         if (normalized) {
           union.add(normalized);
         }
+      }
+    }
+
+    const feedSymbols = [
+      ...this.parseCsv(process.env.PRICES_FEED_SYMBOLS),
+      ...this.parseCsv(process.env.PRICE_TICKER_INSTRUMENTS),
+    ];
+    for (const symbol of feedSymbols) {
+      const normalized = normalizeCanonicalSymbol(symbol);
+      if (normalized) {
+        union.add(normalized);
       }
     }
 
