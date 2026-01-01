@@ -96,6 +96,11 @@ const defaultProviders = firstNonEmpty(
   parseCsv(process.env.ARB_ENABLED_PROVIDERS),
 );
 
+const newsProviders = firstNonEmpty(
+  parseCsv(process.env.FEED_NEWS_PROVIDERS),
+  parseCsv(process.env.NEWS_ENABLED_PROVIDERS),
+);
+
 export const feedsConfig: FeedConfig[] = [
   {
     id: 'prices',
@@ -120,7 +125,7 @@ export const feedsConfig: FeedConfig[] = [
     intervalSec: Number(process.env.NEWS_FEED_INTERVAL_SEC ?? 300),
     destinations: newsDestinations,
     options: {
-      providers: parseCsv(process.env.NEWS_ENABLED_PROVIDERS),
+      providers: newsProviders,
       maxItems: Number(process.env.NEWS_FEED_MAX_ITEMS ?? 10),
       includeTags: process.env.NEWS_FEED_INCLUDE_TAGS !== 'false',
     },

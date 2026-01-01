@@ -75,16 +75,24 @@ export class FeedRunnerService {
       return;
     }
 
-    const symbolSet = new Set(canonicalSymbols);
-    const enabledProviders = new Set(
-      this.providerRegistry.getEnabledProviders().map((provider) => provider.provider),
+    const normalizedProviders = Array.from(
+      new Set(effectiveProviders.map((provider) => provider.trim().toLowerCase()).filter(Boolean)),
+    );
+    const availableProviders = normalizedProviders.filter(
+      (provider) => Boolean(this.providerRegistry.getProviderByName(provider)),
+    );
+    const missingProviders = normalizedProviders.filter(
+      (provider) => !this.providerRegistry.getProviderByName(provider),
     );
 
-    for (const provider of effectiveProviders) {
-      if (!enabledProviders.has(provider.toLowerCase())) {
-        this.logger.warn(`[${runId}] provider not enabled in registry: ${provider}`);
-        continue;
-      }
+    if (missingProviders.length) {
+      this.logger.warn(
+        `[${runId}] prices feed missing providers: ${missingProviders.join(', ')}`,
+      );
+    }
+
+    const symbolSet = new Set(canonicalSymbols);
+    for (const provider of availableProviders) {
       const mappings = this.instrumentRegistry
         .getMappingsForProvider(provider)
         .filter((mapping) => symbolSet.has(mapping.canonicalSymbol));
@@ -94,12 +102,26 @@ export class FeedRunnerService {
     }
 
     const providerTickers = new Map<string, CachedTicker[]>();
-    for (const provider of effectiveProviders) {
-      const cached = await this.marketDataCache.getTickersCached({
-        provider,
-        symbols: canonicalSymbols,
-      });
-      providerTickers.set(provider, cached);
+    const tickerTasks = availableProviders.map(async (provider) => {
+      const cached = await this.withTimeout(
+        this.marketDataCache.getTickersCached({
+          provider,
+          symbols: canonicalSymbols,
+        }),
+        2000,
+        `tickers:${provider}`,
+      );
+      return { provider, cached };
+    });
+
+    const tickerResults = await Promise.allSettled(tickerTasks);
+    for (const result of tickerResults) {
+      if (result.status === 'fulfilled') {
+        providerTickers.set(result.value.provider, result.value.cached);
+      } else {
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        this.logger.warn(`[${runId}] prices feed provider fetch failed: ${message}`);
+      }
     }
 
     const aggregations = this.marketDataCache.aggregateBestPrices({
@@ -107,12 +129,18 @@ export class FeedRunnerService {
       providerTickers,
     });
 
-    const message = formatPricesFeedMessage({
+    let message = formatPricesFeedMessage({
       aggregations,
       format,
       includeTimestamp,
       timestamp: Date.now(),
     });
+
+    if (missingProviders.length) {
+      message += `\n\n⚠️ Missing providers: ${missingProviders.join(
+        ', ',
+      )} (check MARKET_DATA_ENABLED_PROVIDERS)`;
+    }
 
     await Promise.all(destinations.map((chatId) => this.telegram.sendMessage(chatId, message, { parseMode: 'HTML' })));
 
@@ -148,5 +176,19 @@ export class FeedRunnerService {
     await Promise.all(destinations.map((chatId) => this.telegram.sendMessage(chatId, message, { parseMode: 'HTML' })));
 
     this.logger.log(`[${runId}] news sent: destinations=${destinations.length} providers=${effectiveProviders.length} items=${items.length}`);
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }) as Promise<T>;
   }
 }

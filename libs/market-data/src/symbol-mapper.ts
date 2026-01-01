@@ -88,11 +88,6 @@ export const normalizeCanonicalSymbol = (rawSymbol: unknown): string => {
   let s = stripSeparators(rawSymbol);
   if (!s) return '';
 
-  // Bitfinex trading symbol prefix
-  if (s.startsWith('T') && s.length > 4) {
-    s = s.slice(1);
-  }
-
   const split = splitCanonicalSymbol(s);
   if (!split) return s;
 
