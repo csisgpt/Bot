@@ -1,15 +1,21 @@
 import { Instrument } from './models';
 
-/**
- * Canonical symbols are normalized as:
- *   BASEQUOTE (e.g., BTCUSDT, ETHUSD, XAUUSD, USDIRT)
- *
- * We support overrides for provider-specific symbols:
- *   format: "CANONICAL:providerSymbol,CANONICAL2:providerSymbol2"
- *   example: "USDIRT:usd_sell,BTCUSDT:BTC-USDT"
- */
-
-const QUOTE_ASSETS = ['USDT', 'USDC', 'IRR', 'IRT', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'] as const;
+const QUOTE_ASSETS = [
+  'USDT',
+  'USDC',
+  'IRR',
+  'IRT',
+  'USD',
+  'EUR',
+  'GBP',
+  'JPY',
+  'CAD',
+  'CHF',
+  'AUD',
+  'NZD',
+  'BTC',
+  'ETH',
+] as const;
 
 type QuoteAsset = (typeof QUOTE_ASSETS)[number];
 
@@ -18,10 +24,81 @@ const BASE_ALIASES: Record<string, string> = {
   XETH: 'ETH',
 };
 
+const FX_CURRENCIES = new Set([
+  'USD',
+  'EUR',
+  'GBP',
+  'JPY',
+  'CAD',
+  'CHF',
+  'AUD',
+  'NZD',
+]);
+
 export interface ProviderSymbolMapping {
   providerSymbol: string;
   providerInstId: string;
 }
+
+const normalizeProviderKey = (provider: string): string => String(provider || '').trim().toLowerCase();
+
+const stripSeparators = (s: string): string =>
+  s
+    .trim()
+    .toUpperCase()
+    .replace(/^[A-Z]+:/, '') // BINANCE:BTCUSDT
+    .replace(/[\/\-_ \t]/g, '')
+    .replace(/[^A-Z0-9]/g, '');
+
+export const splitCanonicalSymbol = (
+  rawCanonical: string,
+): { base: string; quote: QuoteAsset } | null => {
+  const s = stripSeparators(rawCanonical);
+  if (!s) return null;
+
+  // match longest quote first
+  const quotes = [...QUOTE_ASSETS].sort((a, b) => b.length - a.length);
+  for (const q of quotes) {
+    if (s.length > q.length && s.endsWith(q)) {
+      const base = s.slice(0, -q.length);
+      if (!base) return null;
+      return { base, quote: q };
+    }
+  }
+
+  // Bitfinex USDT uses UST (tBTCUST)
+  if (s.length > 3 && s.endsWith('UST')) {
+    const base = s.slice(0, -3);
+    if (!base) return null;
+    return { base, quote: 'USDT' };
+  }
+
+  return null;
+};
+
+/**
+ * Normalize raw input to canonical symbol (BTCUSDT, EURUSD, USDIRT, ...)
+ * - uppercase
+ * - remove separators
+ * - apply base aliases (XBT->BTC, ...)
+ * - try to recompose base+quote when possible
+ */
+export const normalizeCanonicalSymbol = (rawSymbol: unknown): string => {
+  if (typeof rawSymbol !== 'string') return '';
+  let s = stripSeparators(rawSymbol);
+  if (!s) return '';
+
+  // Bitfinex trading symbol prefix
+  if (s.startsWith('T') && s.length > 4) {
+    s = s.slice(1);
+  }
+
+  const split = splitCanonicalSymbol(s);
+  if (!split) return s;
+
+  const base = BASE_ALIASES[split.base] ?? split.base;
+  return `${base}${split.quote}`;
+};
 
 export const parseOverrides = (raw?: string): Record<string, string> => {
   const map: Record<string, string> = {};
@@ -32,114 +109,180 @@ export const parseOverrides = (raw?: string): Record<string, string> => {
     .map((x) => x.trim())
     .filter(Boolean)
     .forEach((pair) => {
-      const [canonical, providerSymbol] = pair.split(':').map((x) => x?.trim());
-      if (!canonical || !providerSymbol) return;
-      map[canonical.toUpperCase()] = providerSymbol;
+      const [k, v] = pair.split(':').map((x) => x?.trim());
+      if (!k || !v) return;
+      map[normalizeCanonicalSymbol(k)] = v;
     });
 
   return map;
 };
 
-const stripSeparators = (s: string): string => s.replace(/[-_/:]/g, '').toUpperCase();
-
-export const splitCanonicalSymbol = (canonical: string): { base: string; quote: QuoteAsset | null } => {
-  const sym = stripSeparators(canonical);
-
-  // try to split by known quote assets (longer first)
-  const candidates = [...QUOTE_ASSETS].sort((a, b) => b.length - a.length);
-  for (const q of candidates) {
-    if (sym.endsWith(q)) {
-      const base = sym.slice(0, -q.length);
-      return { base: BASE_ALIASES[base] ?? base, quote: q };
-    }
-  }
-
-  return { base: BASE_ALIASES[sym] ?? sym, quote: null };
+const readEnvOverrides = (provider: string): Record<string, string> => {
+  const key = `MARKET_DATA_SYMBOL_OVERRIDES_${normalizeProviderKey(provider).toUpperCase()}`;
+  return parseOverrides(process.env[key]);
 };
 
-const withDash = (base: string, quote: string): string => `${base}-${quote}`;
-const withSlash = (base: string, quote: string): string => `${base}/${quote}`;
-const concat = (base: string, quote: string): string => `${base}${quote}`;
+const readBrsApiAliasOverrides = (): Record<string, string> =>
+  parseOverrides(process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI);
+
+const isTwelveDataEquityLike = (base: string, quote: string): boolean => {
+  // AAPLUSD => AAPL (equity)
+  if (quote !== 'USD') return false;
+  if (FX_CURRENCIES.has(base)) return false;
+  // basic heuristic for tickers
+  return /^[A-Z.]{1,10}$/.test(base) && base.length >= 2;
+};
+
+const brsapiDefaults = (canonical: string): string | null => {
+  // documented defaults (README + tests)
+  switch (canonical) {
+    case 'USDIRT':
+      return 'USD';
+    case 'EURIRT':
+      return 'EUR';
+    case 'SEKKEHIRT':
+      return 'IR_COIN_EMAMI';
+    case 'ABSHODEHIRT':
+      return 'IR_GOLD_MELTED';
+    case 'GOLD18IRT':
+      return 'IR_GOLD_18K';
+    default:
+      return null;
+  }
+};
 
 /**
- * Map canonical -> provider symbol (and optional provider instrument id).
- * Returns null if it cannot be mapped.
+ * Maps canonical symbol to provider symbol/instId
+ * Signature matches tests:
+ *   providerSymbolFromCanonical('navasan','USDIRT','USDIRT:usd_sell') => {providerSymbol:'usd_sell',providerInstId:'usd_sell'}
  */
 export const providerSymbolFromCanonical = (
   provider: string,
   canonicalSymbol: string,
-  overrides?: Record<string, string>,
+  overridesRaw?: string,
 ): ProviderSymbolMapping | null => {
-  const canonical = stripSeparators(canonicalSymbol);
-  const override = overrides?.[canonical];
-  if (override) {
-    return { providerSymbol: override, providerInstId: override };
+  const p = normalizeProviderKey(provider);
+  const canonical = normalizeCanonicalSymbol(canonicalSymbol);
+  if (!canonical) return null;
+
+  const runtimeOverrides = parseOverrides(overridesRaw);
+  const envOverrides = readEnvOverrides(p);
+
+  // Special precedence for brsapi_market: primary > alias > overridesRaw > defaults
+  if (p === 'brsapi_market') {
+    const primary = parseOverrides(process.env.MARKET_DATA_SYMBOL_OVERRIDES_BRSAPI_MARKET);
+    const alias = readBrsApiAliasOverrides();
+
+    const hit =
+      primary[canonical] ??
+      alias[canonical] ??
+      runtimeOverrides[canonical] ??
+      brsapiDefaults(canonical);
+
+    if (!hit) return null;
+    return { providerSymbol: hit, providerInstId: hit };
   }
 
-  const { base, quote } = splitCanonicalSymbol(canonical);
-  if (!quote) return null;
+  // Providers that REQUIRE overrides
+  if (p === 'navasan' || p === 'bonbast') {
+    const hit = runtimeOverrides[canonical] ?? envOverrides[canonical];
+    if (!hit) return null;
+    return { providerSymbol: hit, providerInstId: hit };
+  }
 
-  const b = base;
-  const q = quote;
+  // Generic overrides (runtime overrides should win over env for most providers)
+  const overrideHit = runtimeOverrides[canonical] ?? envOverrides[canonical];
+  if (overrideHit) {
+    return { providerSymbol: overrideHit, providerInstId: overrideHit };
+  }
 
-  switch (provider) {
+  const split = splitCanonicalSymbol(canonical);
+  if (!split) return null;
+
+  let base = BASE_ALIASES[split.base] ?? split.base;
+  const quote = split.quote;
+
+  switch (p) {
+    case 'okx': {
+      const inst = `${base}-${quote}`;
+      return { providerSymbol: inst, providerInstId: inst };
+    }
+
+    case 'gateio': {
+      const inst = `${base}_${quote}`;
+      return { providerSymbol: inst, providerInstId: inst };
+    }
+
+    case 'kraken': {
+      const kb = base === 'BTC' ? 'XBT' : base;
+      return {
+        providerSymbol: `${kb}/${quote}`,
+        providerInstId: `${kb}${quote}`,
+      };
+    }
+
+    case 'coinbase': {
+      const inst = `${base}-${quote}`;
+      return { providerSymbol: inst, providerInstId: inst };
+    }
+
+    case 'bitfinex': {
+      const q = quote === 'USDT' ? 'UST' : quote;
+      const inst = `t${base}${q}`;
+      return { providerSymbol: inst, providerInstId: inst };
+    }
+
+    case 'twelvedata': {
+      if (isTwelveDataEquityLike(base, quote)) {
+        return { providerSymbol: base, providerInstId: base };
+      }
+      // forex/metals default
+      return { providerSymbol: `${base}/${quote}`, providerInstId: `${base}/${quote}` };
+    }
+
+    // default spot exchanges: concat
     case 'binance':
     case 'bybit':
     case 'kucoin':
-    case 'gateio':
-      return { providerSymbol: concat(b, q), providerInstId: concat(b, q) };
-
-    case 'okx':
-      // OKX often uses BASE-QUOTE, but spot can also use BASE-QUOTE
-      return { providerSymbol: withDash(b, q), providerInstId: withDash(b, q) };
-
-    case 'kraken': {
-      // Kraken uses XBT for BTC in many pairs, and sometimes ZUSD etc,
-      // but for simplicity we use common "BASE/QUOTE" form. Provider adapter can handle translation if needed.
-      const krakenBase = b === 'BTC' ? 'XBT' : b;
-      return { providerSymbol: withSlash(krakenBase, q), providerInstId: withSlash(krakenBase, q) };
+    case 'mexc':
+    case 'bitstamp':
+    case 'bitfinex': // already handled but safe
+    default: {
+      const inst = `${base}${quote}`;
+      return { providerSymbol: inst, providerInstId: inst };
     }
-
-    case 'coinbase':
-      // Coinbase uses BASE-QUOTE
-      return { providerSymbol: withDash(b, q), providerInstId: withDash(b, q) };
-
-    case 'bitfinex':
-      // Bitfinex often uses tBASEQUOTE (e.g., tBTCUSD). Adapter may add prefix, but keep mapping stable.
-      return { providerSymbol: concat(b, q), providerInstId: concat(b, q) };
-
-    case 'twelvedata':
-      // TwelveData uses BASE/QUOTE
-      return { providerSymbol: withSlash(b, q), providerInstId: withSlash(b, q) };
-
-    case 'brsapi_market':
-      // Example: USDIRT -> usd_sell (handled by overrides usually)
-      // If no override, default to lowercase base/quote with underscore
-      return { providerSymbol: `${b.toLowerCase()}_${q.toLowerCase()}`, providerInstId: `${b.toLowerCase()}_${q.toLowerCase()}` };
-
-    case 'navasan':
-    case 'bonbast':
-      // These providers typically need explicit overrides due to custom keys.
-      if (overrides?.[canonical]) {
-        const v = overrides[canonical];
-        return { providerSymbol: v, providerInstId: v };
-      }
-      return null;
-
-    default:
-      // default: provider expects BASEQUOTE
-      return { providerSymbol: concat(b, q), providerInstId: concat(b, q) };
   }
 };
 
-export const buildInstrumentFromSymbol = (symbol: string): Instrument => {
-  const canonical = stripSeparators(symbol);
-  const { base, quote } = splitCanonicalSymbol(canonical);
+export const buildInstrumentFromSymbol = (rawSymbol: unknown): Instrument | null => {
+  const canonical = normalizeCanonicalSymbol(rawSymbol);
+  if (!canonical) return null;
+
+  const split = splitCanonicalSymbol(canonical);
+  if (!split) return null;
+
+  const base = BASE_ALIASES[split.base] ?? split.base;
+  const quote = split.quote;
+
+  const assetType =
+    base === 'XAU' ||
+    base === 'XAG' ||
+    base === 'XAUT' ||
+    base === 'PAXG' ||
+    canonical.includes('GOLD') ||
+    canonical.includes('18AYAR') ||
+    canonical.includes('GOLD18') ||
+    canonical.includes('SEKKEH') ||
+    canonical.includes('ABSHODEH')
+      ? 'GOLD'
+      : 'CRYPTO';
 
   return {
-    id: canonical,
-    symbol: canonical,
+    id: `${base.toLowerCase()}-${quote.toLowerCase()}`,
+    assetType,
     base,
-    quote: quote ?? '',
-  } as Instrument;
+    quote,
+    canonicalSymbol: `${base}${quote}`,
+    isActive: true,
+  };
 };
