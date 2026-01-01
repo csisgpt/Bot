@@ -1,40 +1,43 @@
-
-// apps/worker/src/feeds/feeds.config.ts
-
 export type FeedType = 'prices' | 'news' | 'signals';
+export type FeedDestination = string; // e.g., Telegram chatId
 
-export type FeedFormat = 'table' | 'compact';
-
-export interface BaseFeedConfig<TType extends FeedType, TOptions> {
+export interface BaseFeedConfig<TOptions> {
   id: string;
-  type: TType;
+  type: FeedType;
   enabled: boolean;
-  schedule: string; // cron (supports seconds)
-  destinations: string[]; // telegram chat_id(s)
+  intervalSec: number;
+  destinations: FeedDestination[];
   options: TOptions;
 }
 
 export interface PricesFeedOptions {
-  providers: string[];
-  symbols: string[];
-  format: FeedFormat;
-  includeTimestamp: boolean;
+  providers?: string[];
+  symbols?: string[];
+  format?: 'table' | 'compact';
+  includeTimestamp?: boolean;
 }
 
 export interface NewsFeedOptions {
-  providers: string[];
-  maxItems: number;
-  includeTags: boolean;
+  providers?: string[];
+  maxItems?: number;
+  includeTags?: boolean;
 }
 
 export interface SignalsFeedOptions {
+  /**
+   * نحوه ارسال سیگنال‌ها:
+   * - realtime: همزمان با تولید سیگنال منتشر می‌شود (پیشنهادی)
+   * - scheduled: توسط scheduler اجرا می‌شود (اگر بعداً خواستی)
+   */
+  mode?: 'realtime' | 'scheduled';
+
   // اگر بعداً لازم شد توسعه می‌دی
   destinationsOverride?: string[];
 }
 
-export type PricesFeedConfig = BaseFeedConfig<'prices', PricesFeedOptions>;
-export type NewsFeedConfig = BaseFeedConfig<'news', NewsFeedOptions>;
-export type SignalsFeedConfig = BaseFeedConfig<'signals', SignalsFeedOptions>;
+export type PricesFeedConfig = BaseFeedConfig<PricesFeedOptions>;
+export type NewsFeedConfig = BaseFeedConfig<NewsFeedOptions>;
+export type SignalsFeedConfig = BaseFeedConfig<SignalsFeedOptions>;
 
 export type FeedConfig = PricesFeedConfig | NewsFeedConfig | SignalsFeedConfig;
 
@@ -44,37 +47,51 @@ const parseCsv = (raw?: string): string[] =>
     .map((x) => x.trim())
     .filter(Boolean);
 
-const envTrue = (v?: string, def = false): boolean => {
-  if (v === undefined) return def;
-  return ['1', 'true', 'yes', 'on'].includes(v.toLowerCase());
+const firstNonEmpty = (...lists: string[][]): string[] => {
+  for (const list of lists) {
+    if (list && list.length > 0) return list;
+  }
+  return [];
 };
 
-const defaultProviders = parseCsv(process.env.ARB_ENABLED_PROVIDERS) // همون لیست معروف
-  .filter(Boolean);
+const defaultDestinations = firstNonEmpty(
+  parseCsv(process.env.FEEDS_TELEGRAM_DESTINATIONS),
+  parseCsv(process.env.TELEGRAM_CHAT_IDS),
+  parseCsv(process.env.TELEGRAM_SIGNAL_CHANNEL_ID),
+  parseCsv(process.env.TELEGRAM_SIGNAL_GROUP_ID),
+);
 
-const defaultDestinations =
-  parseCsv(process.env.FEEDS_TELEGRAM_DESTINATIONS) ||
-  parseCsv(process.env.PRICES_FEED_DESTINATIONS) ||
-  parseCsv(process.env.TELEGRAM_CHAT_IDS);
+const defaultSymbols = firstNonEmpty(
+  parseCsv(process.env.PRICE_TICKER_INSTRUMENTS),
+  parseCsv(process.env.PRICES_FEED_SYMBOLS),
+);
 
-const defaultSymbols =
-  parseCsv(process.env.PRICE_TICKER_INSTRUMENTS) ||
-  parseCsv(process.env.PRICES_FEED_SYMBOLS);
+const defaultProviders = parseCsv(process.env.ARB_ENABLED_PROVIDERS);
 
 export const feedsConfig: FeedConfig[] = [
   {
-    id: 'prices-main',
+    id: 'prices',
     type: 'prices',
-    enabled: envTrue(process.env.FEEDS_PRICES_ENABLED, true),
-    schedule: process.env.FEEDS_PRICES_CRON ?? '*/30 * * * * *', // هر ۳۰ ثانیه
+    enabled: true,
+    intervalSec: Number(process.env.PRICES_FEED_INTERVAL_SEC ?? 30),
     destinations: defaultDestinations,
     options: {
-      providers: defaultProviders.length ? defaultProviders : ['binance', 'bybit', 'okx', 'coinbase', 'kraken'],
+      providers: defaultProviders.length ? defaultProviders : ['binance'],
       symbols: defaultSymbols.length ? defaultSymbols : ['BTCUSDT', 'ETHUSDT'],
-      format: (process.env.FEEDS_PRICES_FORMAT as FeedFormat) ?? 'table',
-      includeTimestamp: envTrue(process.env.FEEDS_PRICES_INCLUDE_TIMESTAMP, true),
+      format: (process.env.PRICES_FEED_FORMAT as any) ?? 'table',
+      includeTimestamp: process.env.PRICES_FEED_INCLUDE_TIMESTAMP !== 'false',
     },
   },
-
-  // اگر بعداً news/signals خواستی فعال کنی، همینجا اضافه می‌کنی
+  {
+    id: 'news',
+    type: 'news',
+    enabled: process.env.NEWS_FEED_ENABLED === 'true',
+    intervalSec: Number(process.env.NEWS_FEED_INTERVAL_SEC ?? 300),
+    destinations: defaultDestinations,
+    options: {
+      providers: parseCsv(process.env.NEWS_ENABLED_PROVIDERS),
+      maxItems: Number(process.env.NEWS_FEED_MAX_ITEMS ?? 10),
+      includeTags: process.env.NEWS_FEED_INCLUDE_TAGS !== 'false',
+    },
+  },
 ];
