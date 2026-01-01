@@ -1,44 +1,64 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { SchedulerRegistry } from '@nestjs/schedule';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CronJob } from 'cron';
-import { feedsConfig, FeedConfig } from './feeds.config';
+import { feedsConfig } from './feeds.config';
 import { FeedRunnerService } from './feed-runner.service';
 
 @Injectable()
-export class FeedsSchedulerService implements OnModuleInit {
-  private readonly logger = new Logger(FeedsSchedulerService.name);
+export class FeedsScheduler implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(FeedsScheduler.name);
+  private readonly jobs: CronJob[] = [];
+  private readonly running = new Set<string>();
 
   constructor(
-    private readonly scheduler: SchedulerRegistry,
     private readonly runner: FeedRunnerService,
+    private readonly config: ConfigService,
   ) {}
 
   onModuleInit(): void {
+    const flag = (this.config.get<string>('FEEDS_SCHEDULER_ENABLED') ?? '').trim().toLowerCase();
+    if (flag && ['0', 'false', 'no', 'off'].includes(flag)) {
+      this.logger.log('Feeds scheduler disabled (FEEDS_SCHEDULER_ENABLED=false).');
+      return;
+    }
+
+    const timezone = this.config.get<string>('APP_TIMEZONE') || 'UTC';
+
     for (const feed of feedsConfig) {
       if (!feed.enabled) continue;
+      if (!feed.schedule) continue;
 
-      const name = `feed:${feed.id}`;
-      if (this.scheduler.doesExist('cron', name)) {
-        this.scheduler.deleteCronJob(name);
-      }
+      const key = `${feed.type}:${feed.id}`;
 
-      const job = new CronJob(feed.schedule, () => this.safeRun(feed));
-
-      this.scheduler.addCronJob(name, job);
-      job.start();
-
-      this.logger.log(
-        JSON.stringify({ event: 'feed_scheduled', id: feed.id, type: feed.type, schedule: feed.schedule }),
+      const job = new CronJob(
+        feed.schedule,
+        async () => {
+          if (this.running.has(key)) return; // جلوگیری از overlap
+          this.running.add(key);
+          try {
+            await this.runner.runFeed(feed.id, feed.type);
+          } catch (err) {
+            this.logger.error(
+              `Feed run failed: ${key}`,
+              err instanceof Error ? err.stack : String(err),
+            );
+          } finally {
+            this.running.delete(key);
+          }
+        },
+        null,
+        false,
+        timezone,
       );
+
+      job.start();
+      this.jobs.push(job);
+      this.logger.log(`Scheduled feed ${key} (${feed.schedule}) tz=${timezone}`);
     }
   }
 
-  private async safeRun(feed: FeedConfig): Promise<void> {
-    try {
-      await this.runner.runFeed(feed.id);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Unknown error';
-      this.logger.warn(JSON.stringify({ event: 'feed_run_failed', id: feed.id, type: feed.type, message: msg }));
-    }
+  onModuleDestroy(): void {
+    for (const job of this.jobs) job.stop();
+    this.jobs.length = 0;
   }
 }
