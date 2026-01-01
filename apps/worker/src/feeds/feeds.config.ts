@@ -1,85 +1,68 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import {
-  FeedConfig,
-  FeedType,
-  feedsConfig,
-  NewsFeedConfig,
-  PricesFeedConfig,
-} from './feeds.config';
+export type FeedType = 'prices' | 'news' | 'signals';
 
-@Injectable()
-export class FeedConfigService {
-  private readonly logger = new Logger(FeedConfigService.name);
-
-  constructor(private readonly configService: ConfigService) {}
-
-  getPricesFeedConfig(feedId: string): {
-    providers: string[];
-    symbols: string[];
-    destinations: string[];
-    format: 'table' | 'compact';
-    includeTimestamp: boolean;
-  } {
-    const feed = this.getFeedConfig<PricesFeedConfig>(feedId, 'prices');
-
-    const destinations = this.resolveDestinations(feed.destinations);
-    if (!destinations.length) {
-      this.logger.warn(
-        `Feed ${feedId} has no destinations. Set TELEGRAM_SIGNAL_CHANNEL_ID / TELEGRAM_SIGNAL_GROUP_ID.`,
-      );
-    }
-
-    return {
-      providers: feed.options.providers,
-      symbols: feed.options.symbols,
-      destinations,
-      format: feed.options.format,
-      includeTimestamp: feed.options.includeTimestamp,
-    };
-  }
-
-  getNewsFeedConfig(feedId: string): {
-    providers: string[];
-    destinations: string[];
-    maxItems: number;
-    includeTags: boolean;
-  } {
-    const feed = this.getFeedConfig<NewsFeedConfig>(feedId, 'news');
-
-    const destinations = this.resolveDestinations(feed.destinations);
-    if (!destinations.length) {
-      this.logger.warn(
-        `Feed ${feedId} has no destinations. Set TELEGRAM_SIGNAL_CHANNEL_ID / TELEGRAM_SIGNAL_GROUP_ID.`,
-      );
-    }
-
-    return {
-      providers: feed.options.providers,
-      destinations,
-      maxItems: feed.options.maxItems,
-      includeTags: feed.options.includeTags,
-    };
-  }
-
-  private resolveDestinations(explicit: string[]): string[] {
-    if (explicit?.length) return explicit.filter(Boolean);
-
-    // اگر خواستی بعداً جدا کنی، می‌تونی FEEDS_DEFAULT_DESTINATIONS هم اضافه کنی
-    const groupId = this.configService.get<string>('TELEGRAM_SIGNAL_GROUP_ID', '').trim();
-    const channelId = this.configService.get<string>('TELEGRAM_SIGNAL_CHANNEL_ID', '').trim();
-
-    return [groupId, channelId].filter(Boolean);
-  }
-
-  private getFeedConfig<T extends FeedConfig>(feedId: string, type: FeedType): T {
-    const feed = feedsConfig.find((item) => item.id === feedId && item.type === type);
-    if (!feed) {
-      throw new Error(`Feed config not found: ${feedId}`);
-    }
-    if (!feed.enabled) {
-      this.logger.warn(`Feed ${feedId} is disabled.`);
-    }
-    return feed as T;
-  }
+export interface FeedDestination {
+  kind: 'telegram';
+  chatId: string;
 }
+
+interface BaseFeedConfig {
+  id: string;
+  type: FeedType;
+  enabled: boolean;
+  schedule: string; // cron (با ثانیه)
+  destinations: FeedDestination[];
+}
+
+export interface PricesFeedConfig extends BaseFeedConfig {
+  type: 'prices';
+  symbols: string[];
+  format?: 'compact' | 'table';
+  includeTimestamp?: boolean;
+  maxProvidersPerSymbol?: number;
+}
+
+export interface NewsFeedConfig extends BaseFeedConfig {
+  type: 'news';
+  providers: string[];
+  limit?: number;
+}
+
+export interface SignalsFeedConfig extends BaseFeedConfig {
+  type: 'signals';
+  symbols: string[];
+  timeframes: string[];
+}
+
+export type FeedConfig = PricesFeedConfig | NewsFeedConfig | SignalsFeedConfig;
+
+export const feedsConfig: FeedConfig[] = [
+  {
+    id: 'prices-default',
+    type: 'prices',
+    enabled: true,
+    schedule: '*/30 * * * * *', // هر ۳۰ ثانیه
+    destinations: [], // با env پر می‌کنیم
+    symbols: ['BTCUSDT', 'ETHUSDT', 'XRPUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT', 'PAXGUSDT', 'RXUSDT'],
+    format: 'compact',
+    includeTimestamp: true,
+    maxProvidersPerSymbol: 3,
+  },
+  {
+    id: 'news-default',
+    type: 'news',
+    enabled: false,
+    schedule: '0 */10 * * * *', // هر ۱۰ دقیقه
+    destinations: [],
+    providers: ['bybit', 'binance'],
+    limit: 10,
+  },
+  {
+    id: 'signals-default',
+    type: 'signals',
+    enabled: false,
+    schedule: '*/30 * * * * *',
+    destinations: [],
+    symbols: ['BTCUSDT', 'ETHUSDT'],
+    timeframes: ['5m', '15m'],
+  },
+];
