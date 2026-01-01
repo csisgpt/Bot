@@ -40,8 +40,8 @@ export class ActiveSymbolsService {
     }
 
     const feedSymbols = [
+      ...this.parseCsv(process.env.FEED_PRICES_SYMBOLS),
       ...this.parseCsv(process.env.PRICES_FEED_SYMBOLS),
-      ...this.parseCsv(process.env.PRICE_TICKER_INSTRUMENTS),
     ];
     for (const symbol of feedSymbols) {
       const normalized = normalizeCanonicalSymbol(symbol);

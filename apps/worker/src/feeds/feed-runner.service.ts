@@ -64,7 +64,9 @@ export class FeedRunnerService {
       .filter((s): s is string => Boolean(s));
 
     if (destinations.length === 0) {
-      this.logger.warn(`[${runId}] prices feed has no destinations (check env TELEGRAM_CHAT_IDS / FEEDS_TELEGRAM_DESTINATIONS)`);
+      this.logger.warn(
+        `[${runId}] prices feed has no destinations (check env FEED_PRICES_DESTINATIONS / FEEDS_TELEGRAM_DESTINATIONS / TELEGRAM_CHAT_IDS)`,
+      );
       return;
     }
 
@@ -127,7 +129,9 @@ export class FeedRunnerService {
     const effectiveProviders = providers.length ? providers : ['bybit'];
 
     if (destinations.length === 0) {
-      this.logger.warn(`[${runId}] news feed has no destinations (check env TELEGRAM_CHAT_IDS / FEEDS_TELEGRAM_DESTINATIONS)`);
+      this.logger.warn(
+        `[${runId}] news feed has no destinations (check env FEED_NEWS_DESTINATIONS / FEEDS_TELEGRAM_DESTINATIONS / TELEGRAM_CHAT_IDS)`,
+      );
       return;
     }
 

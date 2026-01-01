@@ -43,6 +43,13 @@ export class FeedsScheduler implements OnModuleInit, OnModuleDestroy {
   private registerFeed(feed: FeedConfig, tz?: string) {
     const key = `${feed.type}:${feed.id}`;
     const intervalMs = Math.max(feed.intervalSec, 1) * 1000;
+    void (async () => {
+      try {
+        await this.runner.runFeed(feed.id, feed.type);
+      } catch (e: any) {
+        this.logger.error(`Feed run failed (${key}): ${e?.message ?? e}`);
+      }
+    })();
     const timer = setInterval(async () => {
       try {
         await this.runner.runFeed(feed.id, feed.type);

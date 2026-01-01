@@ -55,18 +55,46 @@ const firstNonEmpty = (...lists: string[][]): string[] => {
 };
 
 const defaultDestinations = firstNonEmpty(
+  parseCsv(process.env.FEED_PRICES_DESTINATIONS),
   parseCsv(process.env.FEEDS_TELEGRAM_DESTINATIONS),
   parseCsv(process.env.TELEGRAM_CHAT_IDS),
   parseCsv(process.env.TELEGRAM_SIGNAL_CHANNEL_ID),
   parseCsv(process.env.TELEGRAM_SIGNAL_GROUP_ID),
+  parseCsv(process.env.TELEGRAM_DEFAULT_DESTINATIONS),
+  parseCsv(process.env.TELEGRAM_DESTINATIONS),
+);
+
+const newsDestinations = firstNonEmpty(
+  parseCsv(process.env.FEED_NEWS_DESTINATIONS),
+  parseCsv(process.env.FEEDS_TELEGRAM_DESTINATIONS),
+  parseCsv(process.env.TELEGRAM_CHAT_IDS),
+  parseCsv(process.env.TELEGRAM_SIGNAL_CHANNEL_ID),
+  parseCsv(process.env.TELEGRAM_SIGNAL_GROUP_ID),
+  parseCsv(process.env.TELEGRAM_DEFAULT_DESTINATIONS),
+  parseCsv(process.env.TELEGRAM_DESTINATIONS),
+);
+
+const signalsDestinations = firstNonEmpty(
+  parseCsv(process.env.FEED_SIGNALS_DESTINATIONS),
+  parseCsv(process.env.FEEDS_TELEGRAM_DESTINATIONS),
+  parseCsv(process.env.TELEGRAM_CHAT_IDS),
+  parseCsv(process.env.TELEGRAM_SIGNAL_CHANNEL_ID),
+  parseCsv(process.env.TELEGRAM_SIGNAL_GROUP_ID),
+  parseCsv(process.env.TELEGRAM_DEFAULT_DESTINATIONS),
+  parseCsv(process.env.TELEGRAM_DESTINATIONS),
 );
 
 const defaultSymbols = firstNonEmpty(
-  parseCsv(process.env.PRICE_TICKER_INSTRUMENTS),
+  parseCsv(process.env.FEED_PRICES_SYMBOLS),
   parseCsv(process.env.PRICES_FEED_SYMBOLS),
+  parseCsv(process.env.UNIVERSE_DEFAULT_SYMBOLS),
 );
 
-const defaultProviders = parseCsv(process.env.ARB_ENABLED_PROVIDERS);
+const defaultProviders = firstNonEmpty(
+  parseCsv(process.env.FEED_PRICES_PROVIDERS),
+  parseCsv(process.env.MARKET_DATA_ENABLED_PROVIDERS),
+  parseCsv(process.env.ARB_ENABLED_PROVIDERS),
+);
 
 export const feedsConfig: FeedConfig[] = [
   {
@@ -85,9 +113,12 @@ export const feedsConfig: FeedConfig[] = [
   {
     id: 'news',
     type: 'news',
-    enabled: process.env.NEWS_FEED_ENABLED === 'true',
+    enabled:
+      process.env.NEWS_FEED_ENABLED !== undefined
+        ? process.env.NEWS_FEED_ENABLED === 'true'
+        : process.env.NEWS_ENABLED === 'true',
     intervalSec: Number(process.env.NEWS_FEED_INTERVAL_SEC ?? 300),
-    destinations: defaultDestinations,
+    destinations: newsDestinations,
     options: {
       providers: parseCsv(process.env.NEWS_ENABLED_PROVIDERS),
       maxItems: Number(process.env.NEWS_FEED_MAX_ITEMS ?? 10),
