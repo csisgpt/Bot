@@ -1,36 +1,35 @@
 export type FeedType = 'prices' | 'news' | 'signals';
 
-export interface FeedDestination {
-  kind: 'telegram';
-  chatId: string;
-}
-
-interface BaseFeedConfig {
+export interface FeedConfigBase {
   id: string;
   type: FeedType;
+  title: string;
   enabled: boolean;
-  schedule: string; // cron (با ثانیه)
-  destinations: FeedDestination[];
+  schedule: string; // cron with seconds: "*/30 * * * * *"
+  destinations: string[]; // chatIds as strings
 }
 
-export interface PricesFeedConfig extends BaseFeedConfig {
+export interface PricesFeedConfig extends FeedConfigBase {
   type: 'prices';
-  symbols: string[];
-  format?: 'compact' | 'table';
-  includeTimestamp?: boolean;
-  maxProvidersPerSymbol?: number;
+  providers: string[];
+  symbolLimit: number;
+  maxProvidersPerSymbol: number;
+  format: 'table' | 'compact';
+  includeTimestamp: boolean;
 }
 
-export interface NewsFeedConfig extends BaseFeedConfig {
+export interface NewsFeedConfig extends FeedConfigBase {
   type: 'news';
   providers: string[];
-  limit?: number;
+  maxItems: number;
 }
 
-export interface SignalsFeedConfig extends BaseFeedConfig {
+export interface SignalsFeedConfig extends FeedConfigBase {
   type: 'signals';
-  symbols: string[];
-  timeframes: string[];
+  options: {
+    mode: 'realtime' | 'batch';
+    includeReasons: boolean;
+  };
 }
 
 export type FeedConfig = PricesFeedConfig | NewsFeedConfig | SignalsFeedConfig;
@@ -39,30 +38,36 @@ export const feedsConfig: FeedConfig[] = [
   {
     id: 'prices-default',
     type: 'prices',
+    title: 'Prices',
     enabled: true,
     schedule: '*/30 * * * * *', // هر ۳۰ ثانیه
-    destinations: [], // با env پر می‌کنیم
-    symbols: ['BTCUSDT', 'ETHUSDT', 'XRPUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT', 'PAXGUSDT', 'RXUSDT'],
-    format: 'compact',
-    includeTimestamp: true,
+    destinations: [], // از env پر میشه (FeedConfigService)
+    providers: ['binance', 'bybit', 'okx', 'coinbase', 'kraken'],
+    symbolLimit: 12,
     maxProvidersPerSymbol: 3,
+    format: 'table',
+    includeTimestamp: true,
   },
   {
     id: 'news-default',
     type: 'news',
+    title: 'News',
     enabled: false,
-    schedule: '0 */10 * * * *', // هر ۱۰ دقیقه
+    schedule: '0 */5 * * * *', // هر ۵ دقیقه
     destinations: [],
-    providers: ['bybit', 'binance'],
-    limit: 10,
+    providers: ['bybit'],
+    maxItems: 5,
   },
   {
     id: 'signals-default',
     type: 'signals',
-    enabled: false,
+    title: 'Signals',
+    enabled: true,
     schedule: '*/30 * * * * *',
     destinations: [],
-    symbols: ['BTCUSDT', 'ETHUSDT'],
-    timeframes: ['5m', '15m'],
+    options: {
+      mode: 'realtime',
+      includeReasons: true,
+    },
   },
 ];
