@@ -53,6 +53,13 @@ export class FeedConfigService implements OnModuleInit {
       );
     }
 
+    if (feedProviders.has('twelvedata')) {
+      const apiKey = this.configService.get<string>('TWELVEDATA_API_KEY', '').trim();
+      if (!apiKey) {
+        this.logger.warn('TWELVEDATA_API_KEY is required when FEED_PRICES_PROVIDERS includes twelvedata.');
+      }
+    }
+
     const pricesFeed = feedsConfig.find((feed) => feed.type === 'prices');
     const pricesOptions = pricesFeed?.options ?? {};
     const symbols =

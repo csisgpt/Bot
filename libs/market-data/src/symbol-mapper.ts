@@ -3,8 +3,6 @@ import { Instrument } from './models';
 const QUOTE_ASSETS = [
   'USDT',
   'USDC',
-  'IRR',
-  'IRT',
   'USD',
   'EUR',
   'GBP',
@@ -15,6 +13,8 @@ const QUOTE_ASSETS = [
   'NZD',
   'BTC',
   'ETH',
+  'IRR',
+  'IRT',
 ] as const;
 
 type QuoteAsset = (typeof QUOTE_ASSETS)[number];
@@ -36,6 +36,11 @@ const FX_CURRENCIES = new Set([
 ]);
 
 export const IRAN_QUOTES = new Set(['IRT', 'IRR']);
+const CRYPTO_QUOTES = new Set(['USDT', 'USDC', 'BTC', 'ETH']);
+const METALS = new Set(['XAU', 'XAG', 'XPT', 'XPD']);
+const EXCHANGE_ONLY_PROVIDERS = new Set(['binance', 'bybit', 'okx']);
+const CRYPTO_ONLY_PROVIDERS = new Set(['coinbase', 'kraken']);
+const IRAN_ONLY_PROVIDERS = new Set(['navasan', 'bonbast', 'brsapi_market']);
 
 export const EXCHANGE_PROVIDERS = new Set([
   'binance',
@@ -93,12 +98,41 @@ export const splitBaseQuote = (
 
 export const providerCanHandle = (providerName: string, canonicalSymbol: string): boolean => {
   const provider = normalizeProviderKey(providerName);
-  if (!EXCHANGE_PROVIDERS.has(provider)) {
-    return true;
-  }
   const split = splitBaseQuote(canonicalSymbol);
   if (!split) return true;
-  return !IRAN_QUOTES.has(split.quote);
+
+  const base = split.base;
+  const quote = split.quote;
+  const isIran = IRAN_QUOTES.has(quote);
+  const isFx = FX_CURRENCIES.has(base) && FX_CURRENCIES.has(quote);
+  const isMetals =
+    METALS.has(base) || base.startsWith('XAU') || base.startsWith('XAG');
+  const isEquity =
+    quote === 'USD' && !FX_CURRENCIES.has(base) && base.length > 1 && base.length <= 6;
+  const isCrypto =
+    CRYPTO_QUOTES.has(quote) && !FX_CURRENCIES.has(base);
+
+  if (IRAN_ONLY_PROVIDERS.has(provider)) {
+    return isIran;
+  }
+
+  if (provider === 'twelvedata') {
+    return !isIran && (isFx || isMetals || isEquity);
+  }
+
+  if (EXCHANGE_ONLY_PROVIDERS.has(provider)) {
+    return isCrypto || canonicalSymbol === 'XAUTUSDT';
+  }
+
+  if (CRYPTO_ONLY_PROVIDERS.has(provider)) {
+    return isCrypto;
+  }
+
+  if (EXCHANGE_PROVIDERS.has(provider)) {
+    return isCrypto;
+  }
+
+  return true;
 };
 
 export const splitCanonicalSymbol = (

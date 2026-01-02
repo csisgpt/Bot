@@ -63,6 +63,8 @@ export class FeedRunnerService {
     const { providers = [], symbols = [], format = 'table', includeTimestamp = true } = cfg.options ?? {};
 
     const effectiveProviders = providers.length ? providers : ['binance'];
+    const timeoutMs = Number(process.env.MARKET_DATA_CACHE_GET_TIMEOUT_MS ?? 8000);
+    const cacheTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 8000;
 
     const canonicalSymbols = (symbols ?? [])
       .map((s: string) => normalizeCanonicalSymbol(s))
@@ -87,6 +89,7 @@ export class FeedRunnerService {
       this.providerRegistry.getEnabledProviders().map((provider) => provider.provider),
     );
     const providerMappings = new Map<string, ReturnType<typeof this.instrumentRegistry.getMappingsForProvider>>();
+    const providerSymbols = new Map<string, string[]>();
     const providersUsed: string[] = [];
     const providersSkipped: Array<{ provider: string; reason: string }> = [];
 
@@ -111,6 +114,10 @@ export class FeedRunnerService {
         continue;
       }
       providerMappings.set(provider, mappings);
+      providerSymbols.set(
+        provider,
+        Array.from(new Set(mappings.map((mapping) => mapping.canonicalSymbol))),
+      );
       providersUsed.push(provider);
     }
 
@@ -131,16 +138,28 @@ export class FeedRunnerService {
     }
 
     const providerTickers = new Map<string, CachedTicker[]>();
+    let twelvedataAuthFailed = false;
     const tickerTasks = providersUsed.map(async (provider) => {
-      const cached = await this.withTimeout(
-        this.marketDataCache.getTickersCached({
-          provider,
-          symbols: canonicalSymbols,
-        }),
-        2000,
-        `tickers:${provider}`,
-      );
-      return { provider, cached };
+      const symbolsForProvider = providerSymbols.get(provider) ?? [];
+      if (!symbolsForProvider.length) {
+        return { provider, cached: [] };
+      }
+      try {
+        const cached = await this.withTimeout(
+          this.marketDataCache.getTickersCached({
+            provider,
+            symbols: symbolsForProvider,
+          }),
+          cacheTimeoutMs,
+          `tickers:${provider}`,
+        );
+        return { provider, cached };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const tagged = new Error(message);
+        (tagged as Error & { provider: string }).provider = provider;
+        throw tagged;
+      }
     });
 
     const tickerResults = await Promise.allSettled(tickerTasks);
@@ -148,13 +167,25 @@ export class FeedRunnerService {
       if (result.status === 'fulfilled') {
         providerTickers.set(result.value.provider, result.value.cached);
       } else {
-        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
-        this.logger.warn(`[${runId}] prices feed provider fetch failed: ${message}`);
+        const error = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+        const message = error.message;
+        const provider = (error as Error & { provider?: string }).provider;
+        if (!twelvedataAuthFailed && provider === 'twelvedata' && message.includes('401')) {
+          twelvedataAuthFailed = true;
+          this.logger.warn(
+            'TWELVEDATA_API_KEY invalid/missing; provider disabled for this run.',
+          );
+          providersSkipped.push({ provider: 'twelvedata', reason: 'auth_error' });
+          continue;
+        }
+        this.logger.warn(
+          `[${runId}] prices feed provider fetch failed${provider ? ` (${provider})` : ''}: ${message}`,
+        );
       }
     }
 
     const twelvedataMappings = providerMappings.get('twelvedata');
-    if (twelvedataMappings) {
+    if (twelvedataMappings && !twelvedataAuthFailed) {
       const twelvedataTickers = providerTickers.get('twelvedata') ?? [];
       const availableSymbols = new Set(twelvedataTickers.map((ticker) => ticker.symbol));
       for (const mapping of twelvedataMappings) {
@@ -187,6 +218,9 @@ export class FeedRunnerService {
       message += `\n\n⚠️ Missing providers: ${notEnabledProviders.join(
         ', ',
       )} (check MARKET_DATA_ENABLED_PROVIDERS)`;
+    }
+    if (twelvedataAuthFailed) {
+      message += '\n\n⚠️ TWELVEDATA_API_KEY invalid/missing; TwelveData disabled.';
     }
 
     await Promise.all(destinations.map((chatId) => this.telegram.sendMessage(chatId, message, { parseMode: 'HTML' })));

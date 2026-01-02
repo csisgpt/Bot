@@ -109,4 +109,13 @@ describe('provider symbol mapping', () => {
     expect(providerCanHandle('bybit', 'BTCUSDT')).toBe(true);
     expect(providerCanHandle('navasan', 'USDIRT')).toBe(true);
   });
+
+  it('filters providers by asset class', () => {
+    expect(providerCanHandle('twelvedata', 'BTCUSDT')).toBe(false);
+    expect(providerCanHandle('twelvedata', 'EURUSD')).toBe(true);
+    expect(providerCanHandle('twelvedata', 'AAPLUSD')).toBe(true);
+    expect(providerCanHandle('twelvedata', 'XAUUSD')).toBe(true);
+    expect(providerCanHandle('bybit', 'EURUSD')).toBe(false);
+    expect(providerCanHandle('bybit', 'XAUTUSDT')).toBe(true);
+  });
 });
