@@ -3,8 +3,6 @@ import { Instrument } from './models';
 const QUOTE_ASSETS = [
   'USDT',
   'USDC',
-  'IRR',
-  'IRT',
   'USD',
   'EUR',
   'GBP',
@@ -15,6 +13,8 @@ const QUOTE_ASSETS = [
   'NZD',
   'BTC',
   'ETH',
+  'IRR',
+  'IRT',
 ] as const;
 
 type QuoteAsset = (typeof QUOTE_ASSETS)[number];
@@ -35,6 +35,26 @@ const FX_CURRENCIES = new Set([
   'NZD',
 ]);
 
+export const IRAN_QUOTES = new Set(['IRT', 'IRR']);
+const CRYPTO_QUOTES = new Set(['USDT', 'USDC', 'BTC', 'ETH']);
+const METALS = new Set(['XAU', 'XAG', 'XPT', 'XPD']);
+const EXCHANGE_ONLY_PROVIDERS = new Set(['binance', 'bybit', 'okx']);
+const CRYPTO_ONLY_PROVIDERS = new Set(['coinbase', 'kraken']);
+const IRAN_ONLY_PROVIDERS = new Set(['navasan', 'bonbast', 'brsapi_market']);
+
+export const EXCHANGE_PROVIDERS = new Set([
+  'binance',
+  'bybit',
+  'okx',
+  'coinbase',
+  'kraken',
+  'kucoin',
+  'gateio',
+  'mexc',
+  'bitfinex',
+  'bitstamp',
+]);
+
 export interface ProviderSymbolMapping {
   providerSymbol: string;
   providerInstId: string;
@@ -49,6 +69,71 @@ const stripSeparators = (s: string): string =>
     .replace(/^[A-Z]+:/, '') // BINANCE:BTCUSDT
     .replace(/[\/\-_ \t]/g, '')
     .replace(/[^A-Z0-9]/g, '');
+
+export const keyOf = (raw: unknown): string => {
+  if (typeof raw !== 'string') return '';
+  return raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+};
+
+export const splitBaseQuote = (
+  rawSymbol: unknown,
+): { base: string; quote: QuoteAsset } | null => {
+  const s = keyOf(rawSymbol);
+  if (!s) return null;
+  const quotes = [...QUOTE_ASSETS].sort((a, b) => b.length - a.length);
+  for (const q of quotes) {
+    if (s.length > q.length && s.endsWith(q)) {
+      const base = s.slice(0, -q.length);
+      if (!base) return null;
+      return { base, quote: q };
+    }
+  }
+  if (s.length > 3 && s.endsWith('UST')) {
+    const base = s.slice(0, -3);
+    if (!base) return null;
+    return { base, quote: 'USDT' };
+  }
+  return null;
+};
+
+export const providerCanHandle = (providerName: string, canonicalSymbol: string): boolean => {
+  const provider = normalizeProviderKey(providerName);
+  const split = splitBaseQuote(canonicalSymbol);
+  if (!split) return true;
+
+  const base = split.base;
+  const quote = split.quote;
+  const isIran = IRAN_QUOTES.has(quote);
+  const isFx = FX_CURRENCIES.has(base) && FX_CURRENCIES.has(quote);
+  const isMetals =
+    METALS.has(base) || base.startsWith('XAU') || base.startsWith('XAG');
+  const isEquity =
+    quote === 'USD' && !FX_CURRENCIES.has(base) && base.length > 1 && base.length <= 6;
+  const isCrypto =
+    CRYPTO_QUOTES.has(quote) && !FX_CURRENCIES.has(base);
+
+  if (IRAN_ONLY_PROVIDERS.has(provider)) {
+    return isIran;
+  }
+
+  if (provider === 'twelvedata') {
+    return !isIran && (isFx || isMetals || isEquity);
+  }
+
+  if (EXCHANGE_ONLY_PROVIDERS.has(provider)) {
+    return isCrypto || canonicalSymbol === 'XAUTUSDT';
+  }
+
+  if (CRYPTO_ONLY_PROVIDERS.has(provider)) {
+    return isCrypto;
+  }
+
+  if (EXCHANGE_PROVIDERS.has(provider)) {
+    return isCrypto;
+  }
+
+  return true;
+};
 
 export const splitCanonicalSymbol = (
   rawCanonical: string,
@@ -106,7 +191,7 @@ export const parseOverrides = (raw?: string): Record<string, string> => {
     .forEach((pair) => {
       const [k, v] = pair.split(':').map((x) => x?.trim());
       if (!k || !v) return;
-      map[normalizeCanonicalSymbol(k)] = v;
+      map[keyOf(k)] = v;
     });
 
   return map;
@@ -159,6 +244,7 @@ export const providerSymbolFromCanonical = (
   const p = normalizeProviderKey(provider);
   const canonical = normalizeCanonicalSymbol(canonicalSymbol);
   if (!canonical) return null;
+  const canonicalKey = keyOf(canonical);
 
   const runtimeOverrides = parseOverrides(overridesRaw);
   const envOverrides = readEnvOverrides(p);
@@ -169,9 +255,9 @@ export const providerSymbolFromCanonical = (
     const alias = readBrsApiAliasOverrides();
 
     const hit =
-      primary[canonical] ??
-      alias[canonical] ??
-      runtimeOverrides[canonical] ??
+      primary[canonicalKey] ??
+      alias[canonicalKey] ??
+      runtimeOverrides[canonicalKey] ??
       brsapiDefaults(canonical);
 
     if (!hit) return null;
@@ -180,13 +266,13 @@ export const providerSymbolFromCanonical = (
 
   // Providers that REQUIRE overrides
   if (p === 'navasan' || p === 'bonbast') {
-    const hit = runtimeOverrides[canonical] ?? envOverrides[canonical];
+    const hit = runtimeOverrides[canonicalKey] ?? envOverrides[canonicalKey];
     if (!hit) return null;
     return { providerSymbol: hit, providerInstId: hit };
   }
 
   // Generic overrides (runtime overrides should win over env for most providers)
-  const overrideHit = runtimeOverrides[canonical] ?? envOverrides[canonical];
+  const overrideHit = runtimeOverrides[canonicalKey] ?? envOverrides[canonicalKey];
   if (overrideHit) {
     return { providerSymbol: overrideHit, providerInstId: overrideHit };
   }

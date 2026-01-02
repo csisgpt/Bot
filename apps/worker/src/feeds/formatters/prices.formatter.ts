@@ -1,5 +1,5 @@
 import { escapeHtml } from './formatting.utils';
-import { normalizeCanonicalSymbol } from '@libs/market-data';
+import { normalizeCanonicalSymbol, splitBaseQuote } from '@libs/market-data';
 
 export interface PriceAggregation {
   symbol: string;
@@ -205,6 +205,14 @@ type SectionKey = 'crypto' | 'fx' | 'metals' | 'iran' | 'other';
 
 const classify = (rawSymbol: string): SectionKey => {
   if (isIranSymbol(rawSymbol)) return 'iran';
+
+  const split = splitBaseQuote(rawSymbol);
+  if (split) {
+    const fxCurrencies = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'CHF', 'AUD', 'NZD']);
+    if (fxCurrencies.has(split.base) && fxCurrencies.has(split.quote)) {
+      return 'fx';
+    }
+  }
 
   const s = prettySymbol(rawSymbol).toUpperCase();
   // Metals / commodities

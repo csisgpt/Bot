@@ -2,6 +2,7 @@
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EXCHANGE_PROVIDERS, IRAN_QUOTES, splitBaseQuote } from '@libs/market-data';
 import {
   FeedConfig,
   FeedType,
@@ -63,6 +64,32 @@ export class FeedConfigService implements OnModuleInit {
         `Feed providers missing from MARKET_DATA_ENABLED_PROVIDERS: ${missing.join(
           ', ',
         )}. Set MARKET_DATA_ENABLED_PROVIDERS=${suggested}`,
+      );
+    }
+
+    if (feedProviders.has('twelvedata')) {
+      const apiKey = this.configService.get<string>('TWELVEDATA_API_KEY', '').trim();
+      if (!apiKey) {
+        this.logger.warn('TWELVEDATA_API_KEY is required when FEED_PRICES_PROVIDERS includes twelvedata.');
+      }
+    }
+
+    const pricesFeed = feedsConfig.find((feed) => feed.type === 'prices');
+    const pricesOptions = pricesFeed?.options ?? {};
+    const symbols =
+      'symbols' in pricesOptions && Array.isArray(pricesOptions.symbols)
+        ? pricesOptions.symbols
+        : [];
+    const hasIranQuotes = symbols.some((symbol: string) => {
+      const split = splitBaseQuote(symbol);
+      return split ? IRAN_QUOTES.has(split.quote) : false;
+    });
+    const exchangeEnabled = enabledProviders.some((provider) =>
+      EXCHANGE_PROVIDERS.has(provider),
+    );
+    if (hasIranQuotes && exchangeEnabled) {
+      this.logger.warn(
+        'Iran-quoted symbols detected in FEED_PRICES_SYMBOLS; exchange providers will be skipped for IRT/IRR pairs.',
       );
     }
   }
