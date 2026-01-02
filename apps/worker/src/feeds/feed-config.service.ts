@@ -7,7 +7,9 @@ import {
   FeedType,
   feedsConfig,
   NewsFeedConfig,
+  NewsFeedOptions,
   PricesFeedConfig,
+  PricesFeedOptions,
   SignalsFeedConfig,
 } from './feeds.config';
 
@@ -19,17 +21,23 @@ export class FeedConfigService implements OnModuleInit {
 
   onModuleInit(): void {
     const feedProviders = new Set<string>();
+
     for (const feed of feedsConfig) {
-      const providers = feed.options?.providers ?? [];
-      providers
-        .map((provider) => provider.trim().toLowerCase())
-        .filter(Boolean)
-        .forEach((provider) => feedProviders.add(provider));
+      // Only prices/news feeds have `providers`
+      const providers: string[] =
+        feed.type === 'prices'
+          ? ((feed.options as PricesFeedOptions).providers ?? [])
+          : feed.type === 'news'
+            ? ((feed.options as NewsFeedOptions).providers ?? [])
+            : [];
+
+      for (const provider of providers) {
+        const p = provider.trim().toLowerCase();
+        if (p) feedProviders.add(p);
+      }
     }
 
-    if (!feedProviders.size) {
-      return;
-    }
+    if (!feedProviders.size) return;
 
     const defaultEnabled =
       'binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp';
@@ -37,12 +45,17 @@ export class FeedConfigService implements OnModuleInit {
       'MARKET_DATA_ENABLED_PROVIDERS',
       defaultEnabled,
     );
+
     const enabledProviders = enabledRaw
       .split(',')
-      .map((item) => item.trim().toLowerCase())
+      .map((item: string) => item.trim().toLowerCase())
       .filter(Boolean);
+
     const enabledSet = new Set(enabledProviders);
-    const missing = Array.from(feedProviders).filter((provider) => !enabledSet.has(provider));
+
+    const missing = Array.from(feedProviders).filter(
+      (p: string) => !enabledSet.has(p),
+    );
 
     if (missing.length) {
       const suggested = Array.from(new Set([...enabledProviders, ...missing])).join(',');
@@ -59,7 +72,7 @@ export class FeedConfigService implements OnModuleInit {
   }
 
   getFeed<T extends FeedConfig>(feedId: string, type: FeedType): T {
-    const feed = feedsConfig.find((item: FeedConfig) => item.id === feedId && item.type === type);
+    const feed = feedsConfig.find((item) => item.id === feedId && item.type === type);
     if (!feed) throw new Error(`Feed config not found: ${feedId} (${type})`);
     if (!feed.enabled) this.logger.warn(`Feed ${feedId} is disabled.`);
     return feed as T;
