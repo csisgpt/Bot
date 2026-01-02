@@ -2,6 +2,7 @@
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EXCHANGE_PROVIDERS, IRAN_QUOTES, splitBaseQuote } from '@libs/market-data';
 import {
   FeedConfig,
   FeedType,
@@ -18,19 +19,6 @@ export class FeedConfigService implements OnModuleInit {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit(): void {
-    const feedProviders = new Set<string>();
-    for (const feed of feedsConfig) {
-      const providers = feed.options?.providers ?? [];
-      providers
-        .map((provider) => provider.trim().toLowerCase())
-        .filter(Boolean)
-        .forEach((provider) => feedProviders.add(provider));
-    }
-
-    if (!feedProviders.size) {
-      return;
-    }
-
     const defaultEnabled =
       'binance,bybit,okx,coinbase,kraken,kucoin,gateio,mexc,bitfinex,bitstamp';
     const enabledRaw = this.configService.get<string>(
@@ -42,6 +30,18 @@ export class FeedConfigService implements OnModuleInit {
       .map((item) => item.trim().toLowerCase())
       .filter(Boolean);
     const enabledSet = new Set(enabledProviders);
+
+    const feedProviders = new Set<string>();
+    for (const feed of feedsConfig) {
+      const options = feed.options ?? {};
+      if ('providers' in options && Array.isArray(options.providers)) {
+        options.providers
+          .map((provider: string) => provider.trim().toLowerCase())
+          .filter(Boolean)
+          .forEach((provider: string) => feedProviders.add(provider));
+      }
+    }
+
     const missing = Array.from(feedProviders).filter((provider) => !enabledSet.has(provider));
 
     if (missing.length) {
@@ -50,6 +50,25 @@ export class FeedConfigService implements OnModuleInit {
         `Feed providers missing from MARKET_DATA_ENABLED_PROVIDERS: ${missing.join(
           ', ',
         )}. Set MARKET_DATA_ENABLED_PROVIDERS=${suggested}`,
+      );
+    }
+
+    const pricesFeed = feedsConfig.find((feed) => feed.type === 'prices');
+    const pricesOptions = pricesFeed?.options ?? {};
+    const symbols =
+      'symbols' in pricesOptions && Array.isArray(pricesOptions.symbols)
+        ? pricesOptions.symbols
+        : [];
+    const hasIranQuotes = symbols.some((symbol: string) => {
+      const split = splitBaseQuote(symbol);
+      return split ? IRAN_QUOTES.has(split.quote) : false;
+    });
+    const exchangeEnabled = enabledProviders.some((provider) =>
+      EXCHANGE_PROVIDERS.has(provider),
+    );
+    if (hasIranQuotes && exchangeEnabled) {
+      this.logger.warn(
+        'Iran-quoted symbols detected in FEED_PRICES_SYMBOLS; exchange providers will be skipped for IRT/IRR pairs.',
       );
     }
   }

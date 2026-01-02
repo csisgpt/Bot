@@ -3,6 +3,7 @@ import { Instrument, InstrumentMapping } from './models';
 import {
   buildInstrumentFromSymbol,
   normalizeCanonicalSymbol,
+  providerCanHandle,
   providerSymbolFromCanonical,
 } from './symbol-mapper';
 
@@ -47,6 +48,17 @@ export class InstrumentRegistryService {
   private buildMappings(provider: string): InstrumentMapping[] {
     return this.getInstruments()
       .map((instrument) => {
+        if (!providerCanHandle(provider, instrument.canonicalSymbol)) {
+          this.logger.debug(
+            JSON.stringify({
+              event: 'symbol_mapping_skipped',
+              provider,
+              symbol: instrument.canonicalSymbol,
+              reason: 'cannot_handle_symbol',
+            }),
+          );
+          return null;
+        }
         const mapping = providerSymbolFromCanonical(provider, instrument.canonicalSymbol);
         if (!mapping) {
           this.logger.warn(
@@ -54,6 +66,7 @@ export class InstrumentRegistryService {
               event: 'symbol_mapping_skipped',
               provider,
               symbol: instrument.canonicalSymbol,
+              reason: 'no_mapping',
             }),
           );
           return null;
