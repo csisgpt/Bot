@@ -6,10 +6,10 @@ import { FeedConfigService } from './feed-config.service';
 import { FeedsScheduler } from './feeds.scheduler';
 import { TelegramPublisherModule } from '../telegram/telegram-publisher.module';
 import { MarketDataV3Module } from '../market-data-v3/market-data-v3.module';
-import { MarketDataModule } from '../market-data/market-data.module';
+import { MarketDataModule as MarketDataCoreModule } from '@libs/market-data';
 
 @Module({
-  imports: [TelegramPublisherModule, MarketDataV3Module, MarketDataModule],
+  imports: [TelegramPublisherModule, MarketDataV3Module, MarketDataCoreModule],
   providers: [FeedRunnerService, FeedConfigService, FeedsScheduler],
   exports: [FeedRunnerService],
 })

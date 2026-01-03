@@ -2,7 +2,6 @@
 
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CronJob } from 'cron';
 import { FeedConfigService } from './feed-config.service';
 import { FeedRunnerService } from './feed-runner.service';
 import { FeedConfig } from './feeds.config';
@@ -10,7 +9,7 @@ import { FeedConfig } from './feeds.config';
 @Injectable()
 export class FeedsScheduler implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FeedsScheduler.name);
-  private readonly jobs = new Map<string, CronJob>();
+  private readonly timers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly config: ConfigService,
@@ -35,30 +34,34 @@ export class FeedsScheduler implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy() {
-    for (const job of this.jobs.values()) job.stop();
-    this.jobs.clear();
+    for (const timer of this.timers.values()) {
+      clearInterval(timer);
+    }
+    this.timers.clear();
   }
 
   private registerFeed(feed: FeedConfig, tz?: string) {
     const key = `${feed.type}:${feed.id}`;
+    const intervalMs = Math.max(feed.intervalSec, 1) * 1000;
+    void (async () => {
+      try {
+        await this.runner.runFeed(feed.id, feed.type);
+      } catch (e: any) {
+        this.logger.error(`Feed run failed (${key}): ${e?.message ?? e}`);
+      }
+    })();
+    const timer = setInterval(async () => {
+      try {
+        await this.runner.runFeed(feed.id, feed.type);
+      } catch (e: any) {
+        this.logger.error(`Feed run failed (${key}): ${e?.message ?? e}`);
+      }
+    }, intervalMs);
 
-    const job = new CronJob(
-      feed.schedule,
-      async () => {
-        try {
-          await this.runner.runFeed(feed.id, feed.type);
-        } catch (e: any) {
-          this.logger.error(`Feed run failed (${key}): ${e?.message ?? e}`);
-        }
-      },
-      null,
-      false,
-      tz,
+    this.timers.set(key, timer);
+
+    this.logger.log(
+      `Registered feed ${key} intervalSec=${feed.intervalSec} tz="${tz ?? 'default'}"`,
     );
-
-    job.start();
-    this.jobs.set(key, job);
-
-    this.logger.log(`Registered feed ${key} schedule="${feed.schedule}" tz="${tz ?? 'default'}"`);
   }
 }

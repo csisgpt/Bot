@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { providerSymbolFromCanonical } from '@libs/market-data';
+import { keyOf, providerCanHandle, providerSymbolFromCanonical } from '@libs/market-data';
 
 describe('provider symbol mapping', () => {
   it('maps canonical symbols to provider formats', () => {
@@ -89,5 +89,33 @@ describe('provider symbol mapping', () => {
       providerSymbol: 'usd1',
       providerInstId: 'usd1',
     });
+  });
+
+  it('normalizes override keys across separators', () => {
+    expect(keyOf('AAPL/USD')).toBe('AAPLUSD');
+    expect(keyOf('AAPLUSD')).toBe('AAPLUSD');
+    expect(providerSymbolFromCanonical('twelvedata', 'AAPLUSD', 'AAPL/USD:AAPL')).toEqual({
+      providerSymbol: 'AAPL',
+      providerInstId: 'AAPL',
+    });
+    expect(providerSymbolFromCanonical('twelvedata', 'BTCUSDT', 'BTC/USDT:BTC/USDT')).toEqual({
+      providerSymbol: 'BTC/USDT',
+      providerInstId: 'BTC/USDT',
+    });
+  });
+
+  it('filters exchange providers for Iran quotes', () => {
+    expect(providerCanHandle('okx', 'GOLD18IRT')).toBe(false);
+    expect(providerCanHandle('bybit', 'BTCUSDT')).toBe(true);
+    expect(providerCanHandle('navasan', 'USDIRT')).toBe(true);
+  });
+
+  it('filters providers by asset class', () => {
+    expect(providerCanHandle('twelvedata', 'BTCUSDT')).toBe(false);
+    expect(providerCanHandle('twelvedata', 'EURUSD')).toBe(true);
+    expect(providerCanHandle('twelvedata', 'AAPLUSD')).toBe(true);
+    expect(providerCanHandle('twelvedata', 'XAUUSD')).toBe(true);
+    expect(providerCanHandle('bybit', 'EURUSD')).toBe(false);
+    expect(providerCanHandle('bybit', 'XAUTUSDT')).toBe(true);
   });
 });
